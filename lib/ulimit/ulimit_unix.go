@@ -1,4 +1,3 @@
-//go:build darwin || linux || netbsd || openbsd
 // +build darwin linux netbsd openbsd
 
 package ulimit

@@ -20,49 +20,46 @@ import (
 	builtin5 "github.com/filecoin-project/specs-actors/v5/actors/builtin"
 	smoothing5 "github.com/filecoin-project/specs-actors/v5/actors/util/smoothing"
 
-	builtin6 "github.com/filecoin-project/specs-actors/v6/actors/builtin"
-	smoothing6 "github.com/filecoin-project/specs-actors/v6/actors/util/smoothing"
-
 	"github.com/filecoin-project/go-state-types/abi"
 	"github.com/filecoin-project/go-state-types/cbor"
 
 	"github.com/filecoin-project/lotus/chain/actors/adt"
 	"github.com/filecoin-project/lotus/chain/types"
 
-	miner6 "github.com/filecoin-project/specs-actors/v6/actors/builtin/miner"
-	proof6 "github.com/filecoin-project/specs-actors/v6/actors/runtime/proof"
+	miner5 "github.com/filecoin-project/specs-actors/v5/actors/builtin/miner"
+	proof5 "github.com/filecoin-project/specs-actors/v5/actors/runtime/proof"
 )
 
-var SystemActorAddr = builtin6.SystemActorAddr
-var BurntFundsActorAddr = builtin6.BurntFundsActorAddr
-var CronActorAddr = builtin6.CronActorAddr
+var SystemActorAddr = builtin5.SystemActorAddr
+var BurntFundsActorAddr = builtin5.BurntFundsActorAddr
+var CronActorAddr = builtin5.CronActorAddr
 var SaftAddress = makeAddress("t0122")
 var ReserveAddress = makeAddress("t090")
 var RootVerifierAddress = makeAddress("t080")
 
 var (
-	ExpectedLeadersPerEpoch = builtin6.ExpectedLeadersPerEpoch
+	ExpectedLeadersPerEpoch = builtin5.ExpectedLeadersPerEpoch
 )
 
 const (
-	EpochDurationSeconds = builtin6.EpochDurationSeconds
-	EpochsInDay          = builtin6.EpochsInDay
-	SecondsInDay         = builtin6.SecondsInDay
+	EpochDurationSeconds = builtin5.EpochDurationSeconds
+	EpochsInDay          = builtin5.EpochsInDay
+	SecondsInDay         = builtin5.SecondsInDay
 )
 
 const (
-	MethodSend        = builtin6.MethodSend
-	MethodConstructor = builtin6.MethodConstructor
+	MethodSend        = builtin5.MethodSend
+	MethodConstructor = builtin5.MethodConstructor
 )
 
 // These are all just type aliases across actor versions. In the future, that might change
 // and we might need to do something fancier.
-type SectorInfo = proof6.SectorInfo
-type PoStProof = proof6.PoStProof
+type SectorInfo = proof5.SectorInfo
+type PoStProof = proof5.PoStProof
 type FilterEstimate = smoothing0.FilterEstimate
 
 func QAPowerForWeight(size abi.SectorSize, duration abi.ChainEpoch, dealWeight, verifiedWeight abi.DealWeight) abi.StoragePower {
-	return miner6.QAPowerForWeight(size, duration, dealWeight, verifiedWeight)
+	return miner5.QAPowerForWeight(size, duration, dealWeight, verifiedWeight)
 }
 
 func FromV0FilterEstimate(v0 smoothing0.FilterEstimate) FilterEstimate {
@@ -92,12 +89,6 @@ func FromV4FilterEstimate(v4 smoothing4.FilterEstimate) FilterEstimate {
 func FromV5FilterEstimate(v5 smoothing5.FilterEstimate) FilterEstimate {
 
 	return (FilterEstimate)(v5)
-
-}
-
-func FromV6FilterEstimate(v6 smoothing6.FilterEstimate) FilterEstimate {
-
-	return (FilterEstimate)(v6)
 
 }
 
@@ -135,9 +126,6 @@ func ActorNameByCode(c cid.Cid) string {
 	case builtin5.IsBuiltinActor(c):
 		return builtin5.ActorNameByCode(c)
 
-	case builtin6.IsBuiltinActor(c):
-		return builtin6.ActorNameByCode(c)
-
 	default:
 		return "<unknown>"
 	}
@@ -162,10 +150,6 @@ func IsBuiltinActor(c cid.Cid) bool {
 	}
 
 	if builtin5.IsBuiltinActor(c) {
-		return true
-	}
-
-	if builtin6.IsBuiltinActor(c) {
 		return true
 	}
 
@@ -194,10 +178,6 @@ func IsAccountActor(c cid.Cid) bool {
 		return true
 	}
 
-	if c == builtin6.AccountActorCodeID {
-		return true
-	}
-
 	return false
 }
 
@@ -220,10 +200,6 @@ func IsStorageMinerActor(c cid.Cid) bool {
 	}
 
 	if c == builtin5.StorageMinerActorCodeID {
-		return true
-	}
-
-	if c == builtin6.StorageMinerActorCodeID {
 		return true
 	}
 
@@ -252,10 +228,6 @@ func IsMultisigActor(c cid.Cid) bool {
 		return true
 	}
 
-	if c == builtin6.MultisigActorCodeID {
-		return true
-	}
-
 	return false
 }
 
@@ -278,10 +250,6 @@ func IsPaymentChannelActor(c cid.Cid) bool {
 	}
 
 	if c == builtin5.PaymentChannelActorCodeID {
-		return true
-	}
-
-	if c == builtin6.PaymentChannelActorCodeID {
 		return true
 	}
 

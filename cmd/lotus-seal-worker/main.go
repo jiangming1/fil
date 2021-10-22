@@ -37,7 +37,6 @@ import (
 	"github.com/filecoin-project/lotus/lib/lotuslog"
 	"github.com/filecoin-project/lotus/lib/rpcenc"
 	"github.com/filecoin-project/lotus/metrics"
-	"github.com/filecoin-project/lotus/metrics/proxy"
 	"github.com/filecoin-project/lotus/node/modules"
 	"github.com/filecoin-project/lotus/node/repo"
 )
@@ -64,10 +63,9 @@ func main() {
 	}
 
 	app := &cli.App{
-		Name:                 "lotus-worker",
-		Usage:                "Remote miner worker",
-		Version:              build.UserVersion(),
-		EnableBashCompletion: true,
+		Name:    "lotus-worker",
+		Usage:   "Remote miner worker",
+		Version: build.UserVersion(),
 		Flags: []cli.Flag{
 			&cli.StringFlag{
 				Name:    FlagWorkerRepo,
@@ -75,12 +73,6 @@ func main() {
 				EnvVars: []string{"LOTUS_WORKER_PATH", "WORKER_PATH"},
 				Value:   "~/.lotusworker", // TODO: Consider XDG_DATA_HOME
 				Usage:   fmt.Sprintf("Specify worker repo path. flag %s and env WORKER_PATH are DEPRECATION, will REMOVE SOON", FlagWorkerRepoDeprecation),
-			},
-			&cli.StringFlag{
-				Name:    "panic-reports",
-				EnvVars: []string{"LOTUS_PANIC_REPORT_PATH"},
-				Hidden:  true,
-				Value:   "~/.lotusworker", // should follow --repo default
 			},
 			&cli.StringFlag{
 				Name:    "miner-repo",
@@ -96,14 +88,6 @@ func main() {
 			},
 		},
 
-		After: func(c *cli.Context) error {
-			if r := recover(); r != nil {
-				// Generate report in LOTUS_PATH and re-raise panic
-				build.GeneratePanicReport(c.String("panic-reports"), c.String(FlagWorkerRepo), c.App.Name)
-				panic(r)
-			}
-			return nil
-		},
 		Commands: local,
 	}
 	app.Setup()
@@ -119,6 +103,26 @@ var runCmd = &cli.Command{
 	Name:  "run",
 	Usage: "Start lotus worker",
 	Flags: []cli.Flag{
+		&cli.StringFlag{
+			Name:  "c2address",
+			Usage: "extern c2 ip and port",
+			Value: "",
+		},
+		&cli.StringFlag{
+			Name:  "rpc",
+			Usage: "worker rpc ip and port",
+			Value: "",
+		},
+		&cli.StringFlag{
+			Name:  "workername",
+			Usage: "worker name will display on jobs list",
+			Value: "",
+		},
+		&cli.StringFlag{
+			Name:  "ability",
+			Usage: "worker sealing ability",
+			Value: "AP:1,PC1:1,PC2:1,C1:1,C2:1,FIN:1,GET:1,UNS:1,RD:1",
+		},
 		&cli.StringFlag{
 			Name:  "listen",
 			Usage: "host address and port the worker api will listen on",
@@ -185,6 +189,16 @@ var runCmd = &cli.Command{
 	},
 	Action: func(cctx *cli.Context) error {
 		log.Info("Starting lotus worker")
+
+		if cctx.String("c2address") != "" {
+			os.Setenv("C2_ADDRESS", cctx.String("c2address"))
+		}
+		if cctx.String("workername") != "" {
+			os.Setenv("WORKER_NAME", cctx.String("workername"))
+		}
+		if cctx.String("ability") != "" {
+			os.Setenv("ABILITY", cctx.String("ability"))
+		}
 
 		if !cctx.Bool("enable-gpu-proving") {
 			if err := os.Setenv("BELLMAN_NO_GPU", "true"); err != nil {
@@ -377,10 +391,9 @@ var runCmd = &cli.Command{
 			return xerrors.Errorf("could not get api info: %w", err)
 		}
 
-		remote := stores.NewRemote(localStore, nodeApi, sminfo.AuthHeader(), cctx.Int("parallel-fetch-limit"),
-			&stores.DefaultPartialFileHandler{})
+		remote := stores.NewRemote(localStore, nodeApi, sminfo.AuthHeader(), cctx.Int("parallel-fetch-limit"))
 
-		fh := &stores.FetchHandler{Local: localStore, PfHandler: &stores.DefaultPartialFileHandler{}}
+		fh := &stores.FetchHandler{Local: localStore}
 		remoteHandler := func(w http.ResponseWriter, r *http.Request) {
 			if !auth.HasPerm(r.Context(), nil, api.PermAdmin) {
 				w.WriteHeader(401)
@@ -410,7 +423,7 @@ var runCmd = &cli.Command{
 
 		readerHandler, readerServerOpt := rpcenc.ReaderParamDecoder()
 		rpcServer := jsonrpc.NewServer(readerServerOpt)
-		rpcServer.Register("Filecoin", api.PermissionedWorkerAPI(proxy.MetricedWorkerAPI(workerApi)))
+		rpcServer.Register("Filecoin", api.PermissionedWorkerAPI(metrics.MetricedWorkerAPI(workerApi)))
 
 		mux.Handle("/rpc/v0", rpcServer)
 		mux.Handle("/rpc/streams/v0/push/{uuid}", readerHandler)

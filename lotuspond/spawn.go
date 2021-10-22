@@ -11,9 +11,6 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/filecoin-project/lotus/build"
-	"github.com/filecoin-project/lotus/chain/actors/builtin/miner"
-
 	"github.com/google/uuid"
 	"golang.org/x/xerrors"
 
@@ -51,12 +48,7 @@ func (api *api) Spawn() (nodeInfo, error) {
 		}
 
 		sbroot := filepath.Join(dir, "preseal")
-		spt, err := miner.SealProofTypeFromSectorSize(2<<10, build.NewestNetworkVersion)
-		if err != nil {
-			return nodeInfo{}, err
-		}
-
-		genm, ki, err := seed.PreSeal(genMiner, spt, 0, 2, sbroot, []byte("8"), nil, false)
+		genm, ki, err := seed.PreSeal(genMiner, abi.RegisteredSealProof_StackedDrg2KiBV1, 0, 2, sbroot, []byte("8"), nil, false)
 		if err != nil {
 			return nodeInfo{}, xerrors.Errorf("preseal failed: %w", err)
 		}
@@ -79,7 +71,6 @@ func (api *api) Spawn() (nodeInfo, error) {
 		template.VerifregRootKey = gen.DefaultVerifregRootkeyActor
 		template.RemainderAccount = gen.DefaultRemainderAccountActor
 		template.NetworkName = "pond-" + uuid.New().String()
-		template.NetworkVersion = build.NewestNetworkVersion
 
 		tb, err := json.Marshal(&template)
 		if err != nil {

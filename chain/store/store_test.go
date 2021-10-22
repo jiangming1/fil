@@ -13,7 +13,6 @@ import (
 
 	"github.com/filecoin-project/lotus/blockstore"
 	"github.com/filecoin-project/lotus/chain/actors/policy"
-	"github.com/filecoin-project/lotus/chain/consensus/filcns"
 	"github.com/filecoin-project/lotus/chain/gen"
 	"github.com/filecoin-project/lotus/chain/stmgr"
 	"github.com/filecoin-project/lotus/chain/store"
@@ -71,13 +70,13 @@ func BenchmarkGetRandomness(b *testing.B) {
 		b.Fatal(err)
 	}
 
-	cs := store.NewChainStore(bs, bs, mds, filcns.Weight, nil)
+	cs := store.NewChainStore(bs, bs, mds, nil, nil)
 	defer cs.Close() //nolint:errcheck
 
 	b.ResetTimer()
 
 	for i := 0; i < b.N; i++ {
-		_, err := cg.StateManager().GetRandomnessFromTickets(context.TODO(), crypto.DomainSeparationTag_SealRandomness, 500, nil, last.Key())
+		_, err := cs.GetChainRandomnessLookingBack(context.TODO(), last.Cids(), crypto.DomainSeparationTag_SealRandomness, 500, nil)
 		if err != nil {
 			b.Fatal(err)
 		}
@@ -106,7 +105,7 @@ func TestChainExportImport(t *testing.T) {
 	}
 
 	nbs := blockstore.NewMemory()
-	cs := store.NewChainStore(nbs, nbs, datastore.NewMapDatastore(), filcns.Weight, nil)
+	cs := store.NewChainStore(nbs, nbs, datastore.NewMapDatastore(), nil, nil)
 	defer cs.Close() //nolint:errcheck
 
 	root, err := cs.Import(buf)
@@ -141,7 +140,7 @@ func TestChainExportImportFull(t *testing.T) {
 	}
 
 	nbs := blockstore.NewMemory()
-	cs := store.NewChainStore(nbs, nbs, datastore.NewMapDatastore(), filcns.Weight, nil)
+	cs := store.NewChainStore(nbs, nbs, datastore.NewMapDatastore(), nil, nil)
 	defer cs.Close() //nolint:errcheck
 
 	root, err := cs.Import(buf)
@@ -158,11 +157,7 @@ func TestChainExportImportFull(t *testing.T) {
 		t.Fatal("imported chain differed from exported chain")
 	}
 
-	sm, err := stmgr.NewStateManager(cs, filcns.NewTipSetExecutor(), nil, filcns.DefaultUpgradeSchedule(), cg.BeaconSchedule())
-	if err != nil {
-		t.Fatal(err)
-	}
-
+	sm := stmgr.NewStateManager(cs)
 	for i := 0; i < 100; i++ {
 		ts, err := cs.GetTipsetByHeight(context.TODO(), abi.ChainEpoch(i), nil, false)
 		if err != nil {

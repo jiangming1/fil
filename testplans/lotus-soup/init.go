@@ -22,12 +22,6 @@ func init() {
 	_ = log.SetLogLevel("stats", "WARN")
 	_ = log.SetLogLevel("dht/RtRefreshManager", "ERROR") // noisy
 	_ = log.SetLogLevel("bitswap", "ERROR")              // noisy
-	_ = log.SetLogLevel("badgerbs", "ERROR")             // noisy
-	_ = log.SetLogLevel("sub", "ERROR")                  // noisy
-	_ = log.SetLogLevel("pubsub", "ERROR")               // noisy
-	_ = log.SetLogLevel("chain", "ERROR")                // noisy
-	_ = log.SetLogLevel("chainstore", "ERROR")           // noisy
-	_ = log.SetLogLevel("basichost", "ERROR")            // noisy
 
 	_ = os.Setenv("BELLMAN_NO_GPU", "1")
 
@@ -42,7 +36,7 @@ func init() {
 	// deadline when the challenge is available.
 	//
 	// This will auto-scale the proving period.
-	// policy.SetWPoStChallengeWindow(abi.ChainEpoch(5)) // commented-out until we enable PoSt faults tests
+	policy.SetWPoStChallengeWindow(abi.ChainEpoch(5))
 
 	// Number of epochs between publishing the precommit and when the challenge for interactive PoRep is drawn
 	// used to ensure it is not predictable by miner.

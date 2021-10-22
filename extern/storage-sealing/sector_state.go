@@ -106,19 +106,11 @@ const (
 	Removed      SectorState = "Removed"
 )
 
-func toStatState(st SectorState, finEarly bool) statSectorState {
+func toStatState(st SectorState) statSectorState {
 	switch st {
-	case UndefinedSectorState, Empty, WaitDeals, AddPiece, AddPieceFailed:
+	case UndefinedSectorState, Empty, WaitDeals, AddPiece:
 		return sstStaging
-	case Packing, GetTicket, PreCommit1, PreCommit2, PreCommitting, PreCommitWait, SubmitPreCommitBatch, PreCommitBatchWait, WaitSeed, Committing, CommitFinalize, FinalizeSector:
-		return sstSealing
-	case SubmitCommit, CommitWait, SubmitCommitAggregate, CommitAggregateWait:
-		if finEarly {
-			// we use statSectorState for throttling storage use. With FinalizeEarly
-			// we can consider sectors in states after CommitFinalize as finalized, so
-			// that more sectors can enter the sealing pipeline (and later be aggregated together)
-			return sstProving
-		}
+	case Packing, GetTicket, PreCommit1, PreCommit2, PreCommitting, PreCommitWait, SubmitPreCommitBatch, PreCommitBatchWait, WaitSeed, Committing, CommitFinalize, SubmitCommit, CommitWait, SubmitCommitAggregate, CommitAggregateWait, FinalizeSector:
 		return sstSealing
 	case Proving, Removed, Removing, Terminating, TerminateWait, TerminateFinality, TerminateFailed:
 		return sstProving

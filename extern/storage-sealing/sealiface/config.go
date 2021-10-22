@@ -1,10 +1,6 @@
 package sealiface
 
-import (
-	"time"
-
-	"github.com/filecoin-project/go-state-types/abi"
-)
+import "time"
 
 // this has to be in a separate package to not make lotus API depend on filecoin-ffi
 
@@ -20,17 +16,9 @@ type Config struct {
 
 	WaitDealsDelay time.Duration
 
-	CommittedCapacitySectorLifetime time.Duration
-
-	StartEpochSealingBuffer abi.ChainEpoch
-
 	AlwaysKeepUnsealedCopy bool
 
 	FinalizeEarly bool
-
-	CollateralFromMinerBalance bool
-	AvailableBalanceBuffer     abi.TokenAmount
-	DisableCollateralFallback  bool
 
 	BatchPreCommits     bool
 	MaxPreCommitBatch   int
@@ -42,9 +30,6 @@ type Config struct {
 	MaxCommitBatch   int
 	CommitBatchWait  time.Duration
 	CommitBatchSlack time.Duration
-
-	AggregateAboveBaseFee      abi.TokenAmount
-	BatchPreCommitAboveBaseFee abi.TokenAmount
 
 	TerminateBatchMax  uint64
 	TerminateBatchMin  uint64

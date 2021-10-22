@@ -51,12 +51,13 @@ func (r *unpadReader) Read(out []byte) (int, error) {
 
 	r.left -= uint64(todo)
 
-	n, err := io.ReadAtLeast(r.src, r.work[:todo], int(todo))
+	n, err := r.src.Read(r.work[:todo])
 	if err != nil && err != io.EOF {
 		return n, err
 	}
-	if n < int(todo) {
-		return 0, xerrors.Errorf("didn't read enough: %d / %d, left %d, out %d", n, todo, r.left, len(out))
+
+	if n != int(todo) {
+		return 0, xerrors.Errorf("didn't read enough: %w", err)
 	}
 
 	Unpad(r.work[:todo], out[:todo.Unpadded()])

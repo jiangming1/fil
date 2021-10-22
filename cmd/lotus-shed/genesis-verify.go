@@ -6,10 +6,7 @@ import (
 	"os"
 	"sort"
 
-	_init "github.com/filecoin-project/lotus/chain/actors/builtin/init"
-
 	"github.com/filecoin-project/lotus/chain/actors/builtin"
-	"github.com/filecoin-project/lotus/chain/consensus/filcns"
 
 	"github.com/fatih/color"
 	"github.com/ipfs/go-datastore"
@@ -55,7 +52,7 @@ var genesisVerifyCmd = &cli.Command{
 		}
 		bs := blockstore.FromDatastore(datastore.NewMapDatastore())
 
-		cs := store.NewChainStore(bs, bs, datastore.NewMapDatastore(), filcns.Weight, nil)
+		cs := store.NewChainStore(bs, bs, datastore.NewMapDatastore(), nil, nil)
 		defer cs.Close() //nolint:errcheck
 
 		cf := cctx.Args().Get(0)
@@ -69,7 +66,9 @@ var genesisVerifyCmd = &cli.Command{
 			return err
 		}
 
-		total, err := stmgr.CheckTotalFIL(context.TODO(), cs, ts)
+		sm := stmgr.NewStateManager(cs)
+
+		total, err := stmgr.CheckTotalFIL(context.TODO(), sm, ts)
 		if err != nil {
 			return err
 		}
@@ -174,24 +173,6 @@ var genesisVerifyCmd = &cli.Command{
 			}
 			fmt.Printf("]\n")
 		}
-
-		act, err := stree.GetActor(_init.Address)
-		if err != nil {
-			return err
-		}
-
-		ias, err := _init.Load(store, act)
-		if err != nil {
-			return err
-		}
-
-		nn, err := ias.NetworkName()
-		if err != nil {
-			return err
-		}
-
-		fmt.Println("Network name: ", nn)
-
 		return nil
 	},
 }

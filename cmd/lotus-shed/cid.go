@@ -26,10 +26,9 @@ var cidIdCmd = &cli.Command{
 	ArgsUsage: "[data]",
 	Flags: []cli.Flag{
 		&cli.StringFlag{
-			Name:    "encoding",
-			Aliases: []string{"e"},
-			Value:   "base64",
-			Usage:   "specify input encoding to parse",
+			Name:  "encoding",
+			Value: "base64",
+			Usage: "specify input encoding to parse",
 		},
 		&cli.StringFlag{
 			Name:  "codec",
@@ -50,14 +49,12 @@ var cidIdCmd = &cli.Command{
 				return xerrors.Errorf("decoding base64 value: %w", err)
 			}
 			dec = data
-		case "hex", "x":
+		case "hex":
 			data, err := hex.DecodeString(cctx.Args().First())
 			if err != nil {
 				return xerrors.Errorf("decoding hex value: %w", err)
 			}
 			dec = data
-		case "raw", "r":
-			dec = []byte(cctx.Args().First())
 		default:
 			return xerrors.Errorf("unrecognized encoding: %s", cctx.String("encoding"))
 		}

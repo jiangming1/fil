@@ -63,7 +63,6 @@ type Gateway interface {
 	StateVerifiedClientStatus(ctx context.Context, addr address.Address, tsk types.TipSetKey) (*abi.StoragePower, error)
 	StateWaitMsg(ctx context.Context, msg cid.Cid, confidence uint64) (*api.MsgLookup, error)
 	WalletBalance(context.Context, address.Address) (types.BigInt, error)
-	Version(context.Context) (api.APIVersion, error)
 }
 
 var _ Gateway = *new(FullNode)

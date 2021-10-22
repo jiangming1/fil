@@ -35,13 +35,13 @@ func failedCooldown(ctx statemachine.Context, sector SectorInfo) error {
 }
 
 func (m *Sealing) checkPreCommitted(ctx statemachine.Context, sector SectorInfo) (*miner.SectorPreCommitOnChainInfo, bool) {
-	tok, _, err := m.Api.ChainHead(ctx.Context())
+	tok, _, err := m.api.ChainHead(ctx.Context())
 	if err != nil {
 		log.Errorf("handleSealPrecommit1Failed(%d): temp error: %+v", sector.SectorNumber, err)
 		return nil, false
 	}
 
-	info, err := m.Api.StateSectorPreCommitInfo(ctx.Context(), m.maddr, sector.SectorNumber, tok)
+	info, err := m.api.StateSectorPreCommitInfo(ctx.Context(), m.maddr, sector.SectorNumber, tok)
 	if err != nil {
 		log.Errorf("handleSealPrecommit1Failed(%d): temp error: %+v", sector.SectorNumber, err)
 		return nil, false
@@ -63,22 +63,22 @@ func (m *Sealing) handleSealPrecommit2Failed(ctx statemachine.Context, sector Se
 		return err
 	}
 
-	if sector.PreCommit2Fails > 3 {
-		return ctx.Send(SectorRetrySealPreCommit1{})
-	}
+	// if sector.PreCommit2Fails > 3 {
+	// 	return ctx.Send(SectorRetrySealPreCommit1{})
+	// }
 
 	return ctx.Send(SectorRetrySealPreCommit2{})
 }
 
 func (m *Sealing) handlePreCommitFailed(ctx statemachine.Context, sector SectorInfo) error {
-	tok, height, err := m.Api.ChainHead(ctx.Context())
+	tok, height, err := m.api.ChainHead(ctx.Context())
 	if err != nil {
 		log.Errorf("handlePreCommitFailed: api error, not proceeding: %+v", err)
 		return nil
 	}
 
 	if sector.PreCommitMessage != nil {
-		mw, err := m.Api.StateSearchMsg(ctx.Context(), *sector.PreCommitMessage)
+		mw, err := m.api.StateSearchMsg(ctx.Context(), *sector.PreCommitMessage)
 		if err != nil {
 			// API error
 			if err := failedCooldown(ctx, sector); err != nil {
@@ -105,7 +105,7 @@ func (m *Sealing) handlePreCommitFailed(ctx statemachine.Context, sector SectorI
 		}
 	}
 
-	if err := checkPrecommit(ctx.Context(), m.Address(), sector, tok, height, m.Api); err != nil {
+	if err := checkPrecommit(ctx.Context(), m.Address(), sector, tok, height, m.api); err != nil {
 		switch err.(type) {
 		case *ErrApi:
 			log.Errorf("handlePreCommitFailed: api error, not proceeding: %+v", err)
@@ -142,7 +142,7 @@ func (m *Sealing) handlePreCommitFailed(ctx statemachine.Context, sector SectorI
 		}
 
 		if pci.Info.SealedCID != *sector.CommR {
-			log.Warnf("sector %d is precommitted on chain, with different CommR: %s != %s", sector.SectorNumber, pci.Info.SealedCID, sector.CommR)
+			log.Warnf("sector %d is precommitted on chain, with different CommR: %x != %x", sector.SectorNumber, pci.Info.SealedCID, sector.CommR)
 			return nil // TODO: remove when the actor allows re-precommit
 		}
 
@@ -174,22 +174,22 @@ func (m *Sealing) handleComputeProofFailed(ctx statemachine.Context, sector Sect
 		return err
 	}
 
-	if sector.InvalidProofs > 1 {
-		return ctx.Send(SectorSealPreCommit1Failed{xerrors.Errorf("consecutive compute fails")})
-	}
+	// if sector.InvalidProofs > 1 {
+	// 	return ctx.Send(SectorSealPreCommit1Failed{xerrors.Errorf("consecutive compute fails")})
+	// }
 
 	return ctx.Send(SectorRetryComputeProof{})
 }
 
 func (m *Sealing) handleCommitFailed(ctx statemachine.Context, sector SectorInfo) error {
-	tok, _, err := m.Api.ChainHead(ctx.Context())
+	tok, height, err := m.api.ChainHead(ctx.Context())
 	if err != nil {
 		log.Errorf("handleCommitting: api error, not proceeding: %+v", err)
 		return nil
 	}
 
 	if sector.CommitMessage != nil {
-		mw, err := m.Api.StateSearchMsg(ctx.Context(), *sector.CommitMessage)
+		mw, err := m.api.StateSearchMsg(ctx.Context(), *sector.CommitMessage)
 		if err != nil {
 			// API error
 			if err := failedCooldown(ctx, sector); err != nil {
@@ -213,6 +213,33 @@ func (m *Sealing) handleCommitFailed(ctx statemachine.Context, sector SectorInfo
 			return ctx.Send(SectorRetrySubmitCommit{})
 		default:
 			// something else went wrong
+		}
+	}
+
+	if err := checkPrecommit(ctx.Context(), m.maddr, sector, tok, height, m.api); err != nil {
+		switch err.(type) {
+		case *ErrApi:
+			log.Errorf("handleCommitFailed: api error, not proceeding: %+v", err)
+			return nil
+		case *ErrBadCommD:
+			return ctx.Send(SectorRetryComputeProof{})
+		case *ErrExpiredTicket:
+			return ctx.Send(SectorTicketExpired{xerrors.Errorf("ticket expired error, removing sector: %w", err)})
+		case *ErrBadTicket:
+			return ctx.Send(SectorTicketExpired{xerrors.Errorf("expired ticket, removing sector: %w", err)})
+		case *ErrInvalidDeals:
+			log.Warnf("invalid deals in sector %d: %v", sector.SectorNumber, err)
+			return ctx.Send(SectorInvalidDealIDs{Return: RetCommitFailed})
+		case *ErrExpiredDeals:
+			return ctx.Send(SectorDealsExpired{xerrors.Errorf("sector deals expired: %w", err)})
+		case nil:
+			return ctx.Send(SectorChainPreCommitFailed{xerrors.Errorf("no precommit: %w", err)})
+		case *ErrPrecommitOnChain:
+			// noop, this is expected
+		case *ErrSectorNumberAllocated:
+			// noop, already committed?
+		default:
+			return xerrors.Errorf("checkPrecommit sanity check error (%T): %w", err, err)
 		}
 	}
 
@@ -286,7 +313,7 @@ func (m *Sealing) handleTerminateFailed(ctx statemachine.Context, sector SectorI
 	// ignoring error as it's most likely an API error - `pci` will be nil, and we'll go back to
 	// the Terminating state after cooldown. If the API is still failing, well get back to here
 	// with the error in SectorInfo log.
-	pci, _ := m.Api.StateSectorPreCommitInfo(ctx.Context(), m.maddr, sector.SectorNumber, nil)
+	pci, _ := m.api.StateSectorPreCommitInfo(ctx.Context(), m.maddr, sector.SectorNumber, nil)
 	if pci != nil {
 		return nil // pause the fsm, needs manual user action
 	}
@@ -300,7 +327,7 @@ func (m *Sealing) handleTerminateFailed(ctx statemachine.Context, sector SectorI
 
 func (m *Sealing) handleDealsExpired(ctx statemachine.Context, sector SectorInfo) error {
 	// First make vary sure the sector isn't committed
-	si, err := m.Api.StateSectorGetInfo(ctx.Context(), m.maddr, sector.SectorNumber, nil)
+	si, err := m.api.StateSectorGetInfo(ctx.Context(), m.maddr, sector.SectorNumber, nil)
 	if err != nil {
 		return xerrors.Errorf("getting sector info: %w", err)
 	}
@@ -319,8 +346,8 @@ func (m *Sealing) handleDealsExpired(ctx statemachine.Context, sector SectorInfo
 	return ctx.Send(SectorRemove{})
 }
 
-func (m *Sealing) HandleRecoverDealIDs(ctx Context, sector SectorInfo) error {
-	tok, height, err := m.Api.ChainHead(ctx.Context())
+func (m *Sealing) handleRecoverDealIDs(ctx statemachine.Context, sector SectorInfo) error {
+	tok, height, err := m.api.ChainHead(ctx.Context())
 	if err != nil {
 		return xerrors.Errorf("getting chain head: %w", err)
 	}
@@ -340,7 +367,7 @@ func (m *Sealing) HandleRecoverDealIDs(ctx Context, sector SectorInfo) error {
 			continue
 		}
 
-		proposal, err := m.Api.StateMarketStorageDealProposal(ctx.Context(), p.DealInfo.DealID, tok)
+		proposal, err := m.api.StateMarketStorageDealProposal(ctx.Context(), p.DealInfo.DealID, tok)
 		if err != nil {
 			log.Warnf("getting deal %d for piece %d: %+v", p.DealInfo.DealID, i, err)
 			toFix = append(toFix, i)
@@ -354,7 +381,7 @@ func (m *Sealing) HandleRecoverDealIDs(ctx Context, sector SectorInfo) error {
 		}
 
 		if proposal.PieceCID != p.Piece.PieceCID {
-			log.Warnf("piece %d (of %d) of sector %d refers deal %d with wrong PieceCID: %s != %s", i, len(sector.Pieces), sector.SectorNumber, p.DealInfo.DealID, p.Piece.PieceCID, proposal.PieceCID)
+			log.Warnf("piece %d (of %d) of sector %d refers deal %d with wrong PieceCID: %x != %x", i, len(sector.Pieces), sector.SectorNumber, p.DealInfo.DealID, p.Piece.PieceCID, proposal.PieceCID)
 			toFix = append(toFix, i)
 			continue
 		}
@@ -389,20 +416,9 @@ func (m *Sealing) HandleRecoverDealIDs(ctx Context, sector SectorInfo) error {
 			mdp := market.DealProposal(*p.DealInfo.DealProposal)
 			dp = &mdp
 		}
-		res, err := m.DealInfo.GetCurrentDealInfo(ctx.Context(), tok, dp, *p.DealInfo.PublishCid)
+		res, err := m.dealInfo.GetCurrentDealInfo(ctx.Context(), tok, dp, *p.DealInfo.PublishCid)
 		if err != nil {
 			failed[i] = xerrors.Errorf("getting current deal info for piece %d: %w", i, err)
-			continue
-		}
-
-		if res.MarketDeal == nil {
-			failed[i] = xerrors.Errorf("nil market deal (%d,%d,%d,%s)", i, sector.SectorNumber, p.DealInfo.DealID, p.Piece.PieceCID)
-			continue
-		}
-
-		if res.MarketDeal.Proposal.PieceCID != p.Piece.PieceCID {
-			failed[i] = xerrors.Errorf("recovered piece (%d) deal in sector %d (dealid %d) has different PieceCID %s != %s", i, sector.SectorNumber, p.DealInfo.DealID, p.Piece.PieceCID, res.MarketDeal.Proposal.PieceCID)
-			continue
 		}
 
 		updates[i] = res.DealID
@@ -420,11 +436,7 @@ func (m *Sealing) HandleRecoverDealIDs(ctx Context, sector SectorInfo) error {
 		}
 
 		// todo: try to remove bad pieces (hard; see the todo above)
-
-		// for now removing sectors is probably better than having them stuck in RecoverDealIDs
-		// and expire anyways
-		log.Errorf("removing sector %d: deals expired or unrecoverable: %+v", sector.SectorNumber, merr)
-		return ctx.Send(SectorRemove{})
+		return xerrors.Errorf("failed to recover some deals: %w", merr)
 	}
 
 	// Not much to do here, we can't go back in time to commit this sector

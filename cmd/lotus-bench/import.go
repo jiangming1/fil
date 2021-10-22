@@ -26,7 +26,6 @@ import (
 	"github.com/filecoin-project/lotus/api"
 	"github.com/filecoin-project/lotus/blockstore"
 	badgerbs "github.com/filecoin-project/lotus/blockstore/badger"
-	"github.com/filecoin-project/lotus/chain/consensus/filcns"
 	"github.com/filecoin-project/lotus/chain/stmgr"
 	"github.com/filecoin-project/lotus/chain/store"
 	"github.com/filecoin-project/lotus/chain/types"
@@ -254,14 +253,10 @@ var importBenchCmd = &cli.Command{
 		}
 
 		metadataDs := datastore.NewMapDatastore()
-		cs := store.NewChainStore(bs, bs, metadataDs, filcns.Weight, nil)
+		cs := store.NewChainStore(bs, bs, metadataDs, vm.Syscalls(verifier), nil)
 		defer cs.Close() //nolint:errcheck
 
-		// TODO: We need to supply the actual beacon after v14
-		stm, err := stmgr.NewStateManager(cs, filcns.NewTipSetExecutor(), vm.Syscalls(verifier), filcns.DefaultUpgradeSchedule(), nil)
-		if err != nil {
-			return err
-		}
+		stm := stmgr.NewStateManager(cs)
 
 		var carFile *os.File
 		// open the CAR file if one is provided.

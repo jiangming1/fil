@@ -1,16 +1,21 @@
-//go:build cgo
-// +build cgo
+//+build cgo
 
 package ffiwrapper
 
 import (
 	"bufio"
 	"bytes"
+	"compress/gzip"
 	"context"
+	"encoding/json"
+	"fmt"
 	"io"
+	"io/ioutil"
 	"math/bits"
+	"net/http"
 	"os"
 	"runtime"
+	"strings"
 
 	"github.com/ipfs/go-cid"
 	"golang.org/x/xerrors"
@@ -24,7 +29,6 @@ import (
 	commpffi "github.com/filecoin-project/go-commp-utils/ffiwrapper"
 	"github.com/filecoin-project/go-commp-utils/zerocomm"
 	"github.com/filecoin-project/lotus/extern/sector-storage/fr32"
-	"github.com/filecoin-project/lotus/extern/sector-storage/partialfile"
 	"github.com/filecoin-project/lotus/extern/sector-storage/storiface"
 )
 
@@ -46,7 +50,98 @@ func (sb *Sealer) NewSector(ctx context.Context, sector storage.SectorRef) error
 	return nil
 }
 
+func (sb *Sealer) myAddPiece(ctx context.Context, sector storage.SectorRef, pieceSize abi.UnpaddedPieceSize) (abi.PieceInfo, error) {
+	var done func()
+	var pieceInfo abi.PieceInfo
+
+	defer func() {
+		if done != nil {
+			done()
+		}
+	}()
+
+	stagedPath, done, err := sb.sectors.AcquireSector(ctx, sector, 0, storiface.FTUnsealed, storiface.PathSealing)
+	if err != nil {
+		return abi.PieceInfo{}, xerrors.Errorf("acquire unsealed sector: %w", err)
+	}
+
+	n := strings.Index(stagedPath.Unsealed, "unsealed")
+	if n == -1 {
+		return abi.PieceInfo{}, xerrors.Errorf("unsealed not exsit")
+	}
+	apTemplatePath := string([]byte(stagedPath.Unsealed)[:n])
+
+	if _, err := os.Stat(apTemplatePath + "piece-info.json"); os.IsNotExist(err) || err != nil { // 判断piece-info.json文件是否存在
+		return abi.PieceInfo{}, xerrors.Errorf("piece-info.json not exsite: %w", err)
+	}
+
+	if _, err := os.Stat(apTemplatePath + "s-template"); os.IsNotExist(err) || err != nil { // 判断s-template文件是否存在
+		return abi.PieceInfo{}, xerrors.Errorf("s-template not exsite: %w", err)
+	}
+
+	configFile, err := os.Open(apTemplatePath + "piece-info.json")
+	if err != nil {
+		return abi.PieceInfo{}, xerrors.Errorf("open piece-info.json failed: %w", err)
+	}
+	defer configFile.Close()
+
+	jsonParser := json.NewDecoder(configFile)
+	if err := jsonParser.Decode(&pieceInfo); err != nil {
+		return abi.PieceInfo{}, xerrors.Errorf("decode piece-info.json failed: %w", err)
+	}
+
+	if pieceInfo.Size != pieceSize.Padded() {
+		return abi.PieceInfo{}, xerrors.Errorf("pieceInfo.Size not the same")
+	}
+
+	if err = os.Link(apTemplatePath+"s-template", stagedPath.Unsealed); err != nil {
+		return abi.PieceInfo{}, xerrors.Errorf("Sector %d unsealed do not create: %w", err)
+	}
+
+	return pieceInfo, nil
+}
+
+func (sb *Sealer) createTemplateFile(unsealedFile string, pieceSize abi.UnpaddedPieceSize, pieceCID cid.Cid) {
+	n := strings.Index(unsealedFile, "unsealed")
+	if n == -1 {
+		log.Warn("unsealed not exsit")
+	} else {
+		apTemplatePath := string([]byte(unsealedFile)[:n])
+
+		myPieceInfo := &abi.PieceInfo{
+			Size:     pieceSize.Padded(),
+			PieceCID: pieceCID,
+		}
+
+		fd, err := os.Create(apTemplatePath + "piece-info.json")
+		if err != nil {
+			log.Warn("create piece-info.json failed: ", err)
+		}
+		defer fd.Close()
+
+		data, err := json.MarshalIndent(myPieceInfo, "", "      ") //data类型是[]byte
+		if err != nil {
+			log.Warn("marshalIndent myPieceInfo failed: ", err)
+		}
+
+		_, err = fd.Write(data)
+		if err != nil {
+			log.Warn("write piece-info.json failed : ", err)
+		}
+
+		if err = os.Link(unsealedFile, apTemplatePath+"s-template"); err != nil {
+			log.Warn("create s-template hard link failed: ", err)
+		}
+	}
+}
+
 func (sb *Sealer) AddPiece(ctx context.Context, sector storage.SectorRef, existingPieceSizes []abi.UnpaddedPieceSize, pieceSize abi.UnpaddedPieceSize, file storage.Data) (abi.PieceInfo, error) {
+	if mypieceInfo, err := sb.myAddPiece(ctx, sector, pieceSize); err == nil {
+		return mypieceInfo, nil
+	} else {
+		log.Warn(err)
+	}
+
 	// TODO: allow tuning those:
 	chunk := abi.PaddedPieceSize(4 << 20)
 	parallel := runtime.NumCPU()
@@ -68,7 +163,7 @@ func (sb *Sealer) AddPiece(ctx context.Context, sector storage.SectorRef, existi
 	}
 
 	var done func()
-	var stagedFile *partialfile.PartialFile
+	var stagedFile *partialFile
 
 	defer func() {
 		if done != nil {
@@ -89,7 +184,7 @@ func (sb *Sealer) AddPiece(ctx context.Context, sector storage.SectorRef, existi
 			return abi.PieceInfo{}, xerrors.Errorf("acquire unsealed sector: %w", err)
 		}
 
-		stagedFile, err = partialfile.CreatePartialFile(maxPieceSize, stagedPath.Unsealed)
+		stagedFile, err = createPartialFile(maxPieceSize, stagedPath.Unsealed)
 		if err != nil {
 			return abi.PieceInfo{}, xerrors.Errorf("creating unsealed sector file: %w", err)
 		}
@@ -99,7 +194,7 @@ func (sb *Sealer) AddPiece(ctx context.Context, sector storage.SectorRef, existi
 			return abi.PieceInfo{}, xerrors.Errorf("acquire unsealed sector: %w", err)
 		}
 
-		stagedFile, err = partialfile.OpenPartialFile(maxPieceSize, stagedPath.Unsealed)
+		stagedFile, err = openPartialFile(maxPieceSize, stagedPath.Unsealed)
 		if err != nil {
 			return abi.PieceInfo{}, xerrors.Errorf("opening unsealed sector file: %w", err)
 		}
@@ -197,16 +292,12 @@ func (sb *Sealer) AddPiece(ctx context.Context, sector storage.SectorRef, existi
 		return piecePromises[0]()
 	}
 
-	var payloadRoundedBytes abi.PaddedPieceSize
 	pieceCids := make([]abi.PieceInfo, len(piecePromises))
 	for i, promise := range piecePromises {
-		pinfo, err := promise()
+		pieceCids[i], err = promise()
 		if err != nil {
 			return abi.PieceInfo{}, err
 		}
-
-		pieceCids[i] = pinfo
-		payloadRoundedBytes += pinfo.Size
 	}
 
 	pieceCID, err := ffi.GenerateUnsealedCID(sector.ProofType, pieceCids)
@@ -219,14 +310,7 @@ func (sb *Sealer) AddPiece(ctx context.Context, sector storage.SectorRef, existi
 		return abi.PieceInfo{}, err
 	}
 
-	if payloadRoundedBytes < pieceSize.Padded() {
-		paddedCid, err := commpffi.ZeroPadPieceCommitment(pieceCID, payloadRoundedBytes.Unpadded(), pieceSize)
-		if err != nil {
-			return abi.PieceInfo{}, xerrors.Errorf("failed to pad data: %w", err)
-		}
-
-		pieceCID = paddedCid
-	}
+	sb.createTemplateFile(stagedPath.Unsealed, pieceSize, pieceCID)
 
 	return abi.PieceInfo{
 		Size:     pieceSize.Padded(),
@@ -259,7 +343,7 @@ func (sb *Sealer) UnsealPiece(ctx context.Context, sector storage.SectorRef, off
 
 	// try finding existing
 	unsealedPath, done, err := sb.sectors.AcquireSector(ctx, sector, storiface.FTUnsealed, storiface.FTNone, storiface.PathStorage)
-	var pf *partialfile.PartialFile
+	var pf *partialFile
 
 	switch {
 	case xerrors.Is(err, storiface.ErrSectorNotFound):
@@ -269,7 +353,7 @@ func (sb *Sealer) UnsealPiece(ctx context.Context, sector storage.SectorRef, off
 		}
 		defer done()
 
-		pf, err = partialfile.CreatePartialFile(maxPieceSize, unsealedPath.Unsealed)
+		pf, err = createPartialFile(maxPieceSize, unsealedPath.Unsealed)
 		if err != nil {
 			return xerrors.Errorf("create unsealed file: %w", err)
 		}
@@ -277,7 +361,7 @@ func (sb *Sealer) UnsealPiece(ctx context.Context, sector storage.SectorRef, off
 	case err == nil:
 		defer done()
 
-		pf, err = partialfile.OpenPartialFile(maxPieceSize, unsealedPath.Unsealed)
+		pf, err = openPartialFile(maxPieceSize, unsealedPath.Unsealed)
 		if err != nil {
 			return xerrors.Errorf("opening partial file: %w", err)
 		}
@@ -429,7 +513,7 @@ func (sb *Sealer) ReadPiece(ctx context.Context, writer io.Writer, sector storag
 	}
 	maxPieceSize := abi.PaddedPieceSize(ssize)
 
-	pf, err := partialfile.OpenPartialFile(maxPieceSize, path.Unsealed)
+	pf, err := openPartialFile(maxPieceSize, path.Unsealed)
 	if err != nil {
 		if xerrors.Is(err, os.ErrNotExist) {
 			return false, nil
@@ -579,6 +663,11 @@ func (sb *Sealer) SealCommit1(ctx context.Context, sector storage.SectorRef, tic
 }
 
 func (sb *Sealer) SealCommit2(ctx context.Context, sector storage.SectorRef, phase1Out storage.Commit1Out) (storage.Proof, error) {
+	if c2Address, ok := os.LookupEnv("C2_ADDRESS"); ok {
+		log.Warnf("Sector %d do the extern commit2 task ......", sector.ID.Number)
+		return RequestCommit2(sector.ID, phase1Out, c2Address)
+	}
+
 	return ffi.SealCommitPhase2(phase1Out, sector.ID.Number, sector.ID.Miner)
 }
 
@@ -591,7 +680,7 @@ func (sb *Sealer) FinalizeSector(ctx context.Context, sector storage.SectorRef, 
 
 	if len(keepUnsealed) > 0 {
 
-		sr := partialfile.PieceRun(0, maxPieceSize)
+		sr := pieceRun(0, maxPieceSize)
 
 		for _, s := range keepUnsealed {
 			si := &rlepluslazy.RunSliceIterator{}
@@ -613,7 +702,7 @@ func (sb *Sealer) FinalizeSector(ctx context.Context, sector storage.SectorRef, 
 		}
 		defer done()
 
-		pf, err := partialfile.OpenPartialFile(maxPieceSize, paths.Unsealed)
+		pf, err := openPartialFile(maxPieceSize, paths.Unsealed)
 		if err == nil {
 			var at uint64
 			for sr.HasNext() {
@@ -731,4 +820,76 @@ func GenerateUnsealedCID(proofType abi.RegisteredSealProof, pieces []abi.PieceIn
 	}
 
 	return ffi.GenerateUnsealedCID(proofType, allPieces)
+}
+
+type Commit2Request struct {
+	SectorID   abi.SectorID
+	Commit1Out storage.Commit1Out
+}
+type Commit2Response struct {
+	SectorID abi.SectorID
+	Proof    storage.Proof
+}
+
+func RequestCommit2(sector abi.SectorID, phase1Out storage.Commit1Out, c2Address string) (storage.Proof, error) {
+	request := Commit2Request{}
+	request.SectorID = abi.SectorID{
+		Miner:  abi.ActorID(sector.Miner),
+		Number: abi.SectorNumber(sector.Number),
+	}
+	request.Commit1Out = phase1Out
+
+	b, err := json.Marshal(request)
+	if err != nil {
+		log.Errorf("json format error: %+v", err)
+		return nil, err
+	}
+
+	zBuf := new(bytes.Buffer)
+	zw := gzip.NewWriter(zBuf)
+	if _, err = zw.Write(b); err != nil {
+		log.Errorf("commit2 gzip failed, error: %+v", err)
+	}
+
+	zw.Flush()
+	zw.Close()
+
+	req, err := http.NewRequest("POST", fmt.Sprintf("http://%s/proxy/commit2", c2Address), zBuf)
+	if err != nil {
+		log.Errorf("http new request err: %+v", err)
+		return nil, err
+	}
+
+	req.Header.Set("Content-Type", "application/json;charset=utf-8")
+	req.Header.Set("Content-Encoding", "gzip")
+
+	log.Info("Send commit2 task to extern server and wait for response ......")
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		log.Error("do request err: ", err)
+		return nil, err
+	}
+
+	if resp.StatusCode != 200 {
+		log.Errorf("http client do code: %d err: %+v", resp.StatusCode, err)
+		return nil, err
+	}
+	defer resp.Body.Close()
+
+	result, err := ioutil.ReadAll(resp.Body)
+	if err != nil {
+		log.Errorf("ioutil read all err: %+v", err)
+		return nil, err
+	}
+
+	response := Commit2Response{}
+	err = json.Unmarshal(result, &response)
+	if err != nil {
+		log.Errorf("json format len: %d error: %+v", len(result), err)
+		return nil, err
+	}
+
+	log.Info("Receive commit2 result success......")
+
+	return response.Proof, nil
 }

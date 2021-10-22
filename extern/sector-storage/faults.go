@@ -63,6 +63,7 @@ func (m *Manager) CheckProvable(ctx context.Context, pp abi.RegisteredPoStProof,
 
 			toCheck := map[string]int64{
 				lp.Sealed:                        1,
+				filepath.Join(lp.Cache, "t_aux"): 0,
 				filepath.Join(lp.Cache, "p_aux"): 0,
 			}
 

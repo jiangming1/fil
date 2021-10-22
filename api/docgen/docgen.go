@@ -16,10 +16,10 @@ import (
 	"github.com/google/uuid"
 	"github.com/ipfs/go-cid"
 	"github.com/ipfs/go-filestore"
-	"github.com/libp2p/go-libp2p-core/metrics"
+	metrics "github.com/libp2p/go-libp2p-core/metrics"
 	"github.com/libp2p/go-libp2p-core/network"
 	"github.com/libp2p/go-libp2p-core/peer"
-	"github.com/libp2p/go-libp2p-core/protocol"
+	protocol "github.com/libp2p/go-libp2p-core/protocol"
 	pubsub "github.com/libp2p/go-libp2p-pubsub"
 	"github.com/multiformats/go-multiaddr"
 
@@ -27,7 +27,7 @@ import (
 	filestore2 "github.com/filecoin-project/go-fil-markets/filestore"
 	"github.com/filecoin-project/go-fil-markets/retrievalmarket"
 	"github.com/filecoin-project/go-jsonrpc/auth"
-	textselector "github.com/ipld/go-ipld-selector-text-lite"
+	"github.com/filecoin-project/go-multistore"
 
 	"github.com/filecoin-project/go-state-types/abi"
 	"github.com/filecoin-project/go-state-types/crypto"
@@ -43,16 +43,14 @@ import (
 	"github.com/filecoin-project/lotus/extern/sector-storage/storiface"
 	sealing "github.com/filecoin-project/lotus/extern/storage-sealing"
 	"github.com/filecoin-project/lotus/node/modules/dtypes"
-	"github.com/filecoin-project/lotus/node/repo/imports"
 )
 
 var ExampleValues = map[reflect.Type]interface{}{
-	reflect.TypeOf(api.MinerSubsystem(0)): api.MinerSubsystem(1),
-	reflect.TypeOf(auth.Permission("")):   auth.Permission("write"),
-	reflect.TypeOf(""):                    "string value",
-	reflect.TypeOf(uint64(42)):            uint64(42),
-	reflect.TypeOf(byte(7)):               byte(7),
-	reflect.TypeOf([]byte{}):              []byte("byte array"),
+	reflect.TypeOf(auth.Permission("")): auth.Permission("write"),
+	reflect.TypeOf(""):                  "string value",
+	reflect.TypeOf(uint64(42)):          uint64(42),
+	reflect.TypeOf(byte(7)):             byte(7),
+	reflect.TypeOf([]byte{}):            []byte("byte array"),
 }
 
 func addExample(v interface{}) {
@@ -90,8 +88,7 @@ func init() {
 	addExample(pid)
 	addExample(&pid)
 
-	storeIDExample := imports.ID(50)
-	textSelExample := textselector.Expression("Links/21/Hash/Links/42/Hash")
+	multistoreIDExample := multistore.StoreID(50)
 
 	addExample(bitfield.NewFromSet([]uint64{5}))
 	addExample(abi.RegisteredSealProof_StackedDrg32GiBV1_1)
@@ -122,11 +119,10 @@ func init() {
 	addExample(time.Minute)
 	addExample(datatransfer.TransferID(3))
 	addExample(datatransfer.Ongoing)
-	addExample(storeIDExample)
-	addExample(&storeIDExample)
+	addExample(multistoreIDExample)
+	addExample(&multistoreIDExample)
 	addExample(retrievalmarket.ClientEventDealAccepted)
 	addExample(retrievalmarket.DealStatusNew)
-	addExample(&textSelExample)
 	addExample(network.ReachabilityPublic)
 	addExample(build.NewestNetworkVersion)
 	addExample(map[string]int{"name": 42})
@@ -179,7 +175,7 @@ func init() {
 
 	// miner specific
 	addExample(filestore2.Path(".lotusminer/fstmp123"))
-	si := uint64(12)
+	si := multistore.StoreID(12)
 	addExample(&si)
 	addExample(retrievalmarket.DealID(5))
 	addExample(abi.ActorID(1000))
@@ -265,47 +261,27 @@ func init() {
 		},
 		"methods": []interface{}{}},
 	)
-
-	addExample(api.CheckStatusCode(0))
-	addExample(map[string]interface{}{"abc": 123})
-	addExample(api.MinerSubsystems{
-		api.SubsystemMining,
-		api.SubsystemSealing,
-		api.SubsystemSectorStorage,
-		api.SubsystemMarkets,
-	})
-	addExample(api.DagstoreShardResult{
-		Key:   "baga6ea4seaqecmtz7iak33dsfshi627abz4i4665dfuzr3qfs4bmad6dx3iigdq",
-		Error: "<error>",
-	})
-	addExample(api.DagstoreShardInfo{
-		Key:   "baga6ea4seaqecmtz7iak33dsfshi627abz4i4665dfuzr3qfs4bmad6dx3iigdq",
-		State: "ShardStateAvailable",
-		Error: "<error>",
-	})
 }
 
-func GetAPIType(name, pkg string) (i interface{}, t reflect.Type, permStruct []reflect.Type) {
-
+func GetAPIType(name, pkg string) (i interface{}, t, permStruct, commonPermStruct reflect.Type) {
 	switch pkg {
 	case "api": // latest
 		switch name {
 		case "FullNode":
 			i = &api.FullNodeStruct{}
 			t = reflect.TypeOf(new(struct{ api.FullNode })).Elem()
-			permStruct = append(permStruct, reflect.TypeOf(api.FullNodeStruct{}.Internal))
-			permStruct = append(permStruct, reflect.TypeOf(api.CommonStruct{}.Internal))
-			permStruct = append(permStruct, reflect.TypeOf(api.NetStruct{}.Internal))
+			permStruct = reflect.TypeOf(api.FullNodeStruct{}.Internal)
+			commonPermStruct = reflect.TypeOf(api.CommonStruct{}.Internal)
 		case "StorageMiner":
 			i = &api.StorageMinerStruct{}
 			t = reflect.TypeOf(new(struct{ api.StorageMiner })).Elem()
-			permStruct = append(permStruct, reflect.TypeOf(api.StorageMinerStruct{}.Internal))
-			permStruct = append(permStruct, reflect.TypeOf(api.CommonStruct{}.Internal))
-			permStruct = append(permStruct, reflect.TypeOf(api.NetStruct{}.Internal))
+			permStruct = reflect.TypeOf(api.StorageMinerStruct{}.Internal)
+			commonPermStruct = reflect.TypeOf(api.CommonStruct{}.Internal)
 		case "Worker":
 			i = &api.WorkerStruct{}
 			t = reflect.TypeOf(new(struct{ api.Worker })).Elem()
-			permStruct = append(permStruct, reflect.TypeOf(api.WorkerStruct{}.Internal))
+			permStruct = reflect.TypeOf(api.WorkerStruct{}.Internal)
+			commonPermStruct = reflect.TypeOf(api.WorkerStruct{}.Internal)
 		default:
 			panic("unknown type")
 		}
@@ -314,9 +290,8 @@ func GetAPIType(name, pkg string) (i interface{}, t reflect.Type, permStruct []r
 		case "FullNode":
 			i = v0api.FullNodeStruct{}
 			t = reflect.TypeOf(new(struct{ v0api.FullNode })).Elem()
-			permStruct = append(permStruct, reflect.TypeOf(v0api.FullNodeStruct{}.Internal))
-			permStruct = append(permStruct, reflect.TypeOf(v0api.CommonStruct{}.Internal))
-			permStruct = append(permStruct, reflect.TypeOf(v0api.NetStruct{}.Internal))
+			permStruct = reflect.TypeOf(v0api.FullNodeStruct{}.Internal)
+			commonPermStruct = reflect.TypeOf(v0api.CommonStruct{}.Internal)
 		default:
 			panic("unknown type")
 		}

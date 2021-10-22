@@ -21,25 +21,22 @@ const (
 type CompleteGeneratePoSTCb func(posts []miner.SubmitWindowedPoStParams, err error)
 type CompleteSubmitPoSTCb func(err error)
 
-// wdPoStCommands is the subset of the WindowPoStScheduler + full node APIs used
-// by the changeHandler to execute actions and query state.
-type wdPoStCommands interface {
+type changeHandlerAPI interface {
 	StateMinerProvingDeadline(context.Context, address.Address, types.TipSetKey) (*dline.Info, error)
-
 	startGeneratePoST(ctx context.Context, ts *types.TipSet, deadline *dline.Info, onComplete CompleteGeneratePoSTCb) context.CancelFunc
 	startSubmitPoST(ctx context.Context, ts *types.TipSet, deadline *dline.Info, posts []miner.SubmitWindowedPoStParams, onComplete CompleteSubmitPoSTCb) context.CancelFunc
 	onAbort(ts *types.TipSet, deadline *dline.Info)
-	recordPoStFailure(err error, ts *types.TipSet, deadline *dline.Info)
+	failPost(err error, ts *types.TipSet, deadline *dline.Info)
 }
 
 type changeHandler struct {
-	api        wdPoStCommands
+	api        changeHandlerAPI
 	actor      address.Address
 	proveHdlr  *proveHandler
 	submitHdlr *submitHandler
 }
 
-func newChangeHandler(api wdPoStCommands, actor address.Address) *changeHandler {
+func newChangeHandler(api changeHandlerAPI, actor address.Address) *changeHandler {
 	posts := newPostsCache()
 	p := newProver(api, posts)
 	s := newSubmitter(api, posts)
@@ -149,7 +146,7 @@ type postResult struct {
 
 // proveHandler generates proofs
 type proveHandler struct {
-	api   wdPoStCommands
+	api   changeHandlerAPI
 	posts *postsCache
 
 	postResults chan *postResult
@@ -166,7 +163,7 @@ type proveHandler struct {
 }
 
 func newProver(
-	api wdPoStCommands,
+	api changeHandlerAPI,
 	posts *postsCache,
 ) *proveHandler {
 	ctx, cancel := context.WithCancel(context.Background())
@@ -251,7 +248,7 @@ func (p *proveHandler) processPostResult(res *postResult) {
 	di := res.currPost.di
 	if res.err != nil {
 		// Proving failed so inform the API
-		p.api.recordPoStFailure(res.err, res.ts, di)
+		p.api.failPost(res.err, res.ts, di)
 		log.Warnf("Aborted window post Proving (Deadline: %+v)", di)
 		p.api.onAbort(res.ts, di)
 
@@ -298,7 +295,7 @@ type postInfo struct {
 
 // submitHandler submits proofs on-chain
 type submitHandler struct {
-	api   wdPoStCommands
+	api   changeHandlerAPI
 	posts *postsCache
 
 	submitResults chan *submitResult
@@ -322,7 +319,7 @@ type submitHandler struct {
 }
 
 func newSubmitter(
-	api wdPoStCommands,
+	api changeHandlerAPI,
 	posts *postsCache,
 ) *submitHandler {
 	ctx, cancel := context.WithCancel(context.Background())
@@ -491,7 +488,7 @@ func (s *submitHandler) submitIfReady(ctx context.Context, advance *types.TipSet
 func (s *submitHandler) processSubmitResult(res *submitResult) {
 	if res.err != nil {
 		// Submit failed so inform the API and go back to the start state
-		s.api.recordPoStFailure(res.err, res.pw.ts, res.pw.di)
+		s.api.failPost(res.err, res.pw.ts, res.pw.di)
 		log.Warnf("Aborted window post Submitting (Deadline: %+v)", res.pw.di)
 		s.api.onAbort(res.pw.ts, res.pw.di)
 

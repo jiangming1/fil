@@ -113,9 +113,8 @@ var fsmPlanners = map[SectorState]func(events []statemachine.Event, state *Secto
 		on(SectorCommitFailed{}, CommitFailed),
 	),
 	SubmitCommitAggregate: planOne(
-		on(SectorCommitAggregateSent{}, CommitAggregateWait),
+		on(SectorCommitAggregateSent{}, CommitWait),
 		on(SectorCommitFailed{}, CommitFailed),
-		on(SectorRetrySubmitCommit{}, SubmitCommit),
 	),
 	CommitWait: planOne(
 		on(SectorProving{}, FinalizeSector),
@@ -135,11 +134,7 @@ var fsmPlanners = map[SectorState]func(events []statemachine.Event, state *Secto
 
 	// Sealing errors
 
-	AddPieceFailed: planOne(
-		on(SectorRetryWaitDeals{}, WaitDeals),
-		apply(SectorStartPacking{}),
-		apply(SectorAddPiece{}),
-	),
+	AddPieceFailed: planOne(),
 	SealPreCommit1Failed: planOne(
 		on(SectorRetrySealPreCommit1{}, PreCommit1),
 	),
@@ -161,7 +156,7 @@ var fsmPlanners = map[SectorState]func(events []statemachine.Event, state *Secto
 		on(SectorSealPreCommit1Failed{}, SealPreCommit1Failed),
 	),
 	CommitFinalizeFailed: planOne(
-		on(SectorRetryFinalize{}, CommitFinalize),
+		on(SectorRetryFinalize{}, CommitFinalizeFailed),
 	),
 	CommitFailed: planOne(
 		on(SectorSealPreCommit1Failed{}, SealPreCommit1Failed),
@@ -335,9 +330,9 @@ func (m *Sealing) plan(events []statemachine.Event, state *SectorInfo) (func(sta
 				*<- Committing    |
 				|   |        ^--> CommitFailed
 				|   v             ^
-			        |   SubmitCommit  |
-		        	|   |             |
-		        	|   v             |
+		        |   SubmitCommit  |
+		        |   |             |
+		        |   v             |
 				*<- CommitWait ---/
 				|   |
 				|   v
@@ -353,13 +348,6 @@ func (m *Sealing) plan(events []statemachine.Event, state *SectorInfo) (func(sta
 
 	if err := m.onUpdateSector(context.TODO(), state); err != nil {
 		log.Errorw("update sector stats", "error", err)
-	}
-
-	// todo: drop this, use Context iface everywhere
-	wrapCtx := func(f func(Context, SectorInfo) error) func(statemachine.Context, SectorInfo) error {
-		return func(ctx statemachine.Context, info SectorInfo) error {
-			return f(&ctx, info)
-		}
 	}
 
 	switch state.State {
@@ -404,8 +392,6 @@ func (m *Sealing) plan(events []statemachine.Event, state *SectorInfo) (func(sta
 		return m.handleFinalizeSector, processed, nil
 
 	// Handled failure modes
-	case AddPieceFailed:
-		return m.handleAddPieceFailed, processed, nil
 	case SealPreCommit1Failed:
 		return m.handleSealPrecommit1Failed, processed, nil
 	case SealPreCommit2Failed:
@@ -426,7 +412,7 @@ func (m *Sealing) plan(events []statemachine.Event, state *SectorInfo) (func(sta
 	case DealsExpired:
 		return m.handleDealsExpired, processed, nil
 	case RecoverDealIDs:
-		return wrapCtx(m.HandleRecoverDealIDs), processed, nil
+		return m.handleRecoverDealIDs, processed, nil
 
 	// Post-seal
 	case Proving:
@@ -474,16 +460,15 @@ func (m *Sealing) onUpdateSector(ctx context.Context, state *SectorInfo) error {
 	if err != nil {
 		return xerrors.Errorf("getting config: %w", err)
 	}
+	sp, err := m.currentSealProof(ctx)
+	if err != nil {
+		return xerrors.Errorf("getting seal proof type: %w", err)
+	}
 
 	shouldUpdateInput := m.stats.updateSector(cfg, m.minerSectorID(state.SectorNumber), state.State)
 
 	// trigger more input processing when we've dipped below max sealing limits
 	if shouldUpdateInput {
-		sp, err := m.currentSealProof(ctx)
-		if err != nil {
-			return xerrors.Errorf("getting seal proof type: %w", err)
-		}
-
 		go func() {
 			m.inputLk.Lock()
 			defer m.inputLk.Unlock()

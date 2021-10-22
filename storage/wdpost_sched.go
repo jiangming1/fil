@@ -23,14 +23,8 @@ import (
 	"go.opencensus.io/trace"
 )
 
-// WindowPoStScheduler is the coordinator for WindowPoSt submissions, fault
-// declaration, and recovery declarations. It watches the chain for reverts and
-// applies, and schedules/run those processes as partition deadlines arrive.
-//
-// WindowPoStScheduler watches the chain though the changeHandler, which in turn
-// turn calls the scheduler when the time arrives to do work.
 type WindowPoStScheduler struct {
-	api              fullNodeFilteredAPI
+	api              storageMinerApi
 	feeCfg           config.MinerFeeConfig
 	addrSel          *AddressSelector
 	prover           storage.Prover
@@ -49,15 +43,7 @@ type WindowPoStScheduler struct {
 	// failLk sync.Mutex
 }
 
-// NewWindowedPoStScheduler creates a new WindowPoStScheduler scheduler.
-func NewWindowedPoStScheduler(api fullNodeFilteredAPI,
-	cfg config.MinerFeeConfig,
-	as *AddressSelector,
-	sp storage.Prover,
-	verif ffiwrapper.Verifier,
-	ft sectorstorage.FaultTracker,
-	j journal.Journal,
-	actor address.Address) (*WindowPoStScheduler, error) {
+func NewWindowedPoStScheduler(api storageMinerApi, fc config.MinerFeeConfig, as *AddressSelector, sb storage.Prover, verif ffiwrapper.Verifier, ft sectorstorage.FaultTracker, j journal.Journal, actor address.Address) (*WindowPoStScheduler, error) {
 	mi, err := api.StateMinerInfo(context.TODO(), actor, types.EmptyTSK)
 	if err != nil {
 		return nil, xerrors.Errorf("getting sector size: %w", err)
@@ -65,9 +51,9 @@ func NewWindowedPoStScheduler(api fullNodeFilteredAPI,
 
 	return &WindowPoStScheduler{
 		api:              api,
-		feeCfg:           cfg,
+		feeCfg:           fc,
 		addrSel:          as,
-		prover:           sp,
+		prover:           sb,
 		verifier:         verif,
 		faultTracker:     ft,
 		proofType:        mi.WindowPoStProofType,
@@ -84,24 +70,21 @@ func NewWindowedPoStScheduler(api fullNodeFilteredAPI,
 	}, nil
 }
 
+type changeHandlerAPIImpl struct {
+	storageMinerApi
+	*WindowPoStScheduler
+}
+
 func (s *WindowPoStScheduler) Run(ctx context.Context) {
-	// Initialize change handler.
-
-	// callbacks is a union of the fullNodeFilteredAPI and ourselves.
-	callbacks := struct {
-		fullNodeFilteredAPI
-		*WindowPoStScheduler
-	}{s.api, s}
-
-	s.ch = newChangeHandler(callbacks, s.actor)
+	// Initialize change handler
+	chImpl := &changeHandlerAPIImpl{storageMinerApi: s.api, WindowPoStScheduler: s}
+	s.ch = newChangeHandler(chImpl, s.actor)
 	defer s.ch.shutdown()
 	s.ch.start()
 
-	var (
-		notifs <-chan []*api.HeadChange
-		err    error
-		gotCur bool
-	)
+	var notifs <-chan []*api.HeadChange
+	var err error
+	var gotCur bool
 
 	// not fine to panic after this point
 	for {

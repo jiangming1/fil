@@ -3,15 +3,12 @@ package stores
 import (
 	"context"
 	"errors"
-	"fmt"
 	"net/url"
 	gopath "path"
 	"sort"
 	"sync"
 	"time"
 
-	"go.opencensus.io/stats"
-	"go.opencensus.io/tag"
 	"golang.org/x/xerrors"
 
 	"github.com/filecoin-project/go-state-types/abi"
@@ -19,7 +16,6 @@ import (
 
 	"github.com/filecoin-project/lotus/extern/sector-storage/fsutil"
 	"github.com/filecoin-project/lotus/extern/sector-storage/storiface"
-	"github.com/filecoin-project/lotus/metrics"
 )
 
 var HeartbeatInterval = 10 * time.Second
@@ -64,13 +60,12 @@ type SectorIndex interface { // part of storage-miner api
 	StorageDropSector(ctx context.Context, storageID ID, s abi.SectorID, ft storiface.SectorFileType) error
 	StorageFindSector(ctx context.Context, sector abi.SectorID, ft storiface.SectorFileType, ssize abi.SectorSize, allowFetch bool) ([]SectorStorageInfo, error)
 
+	MaybeAddPice(ctx context.Context, allocate storiface.SectorFileType, ssize abi.SectorSize, pathType storiface.PathType) bool
 	StorageBestAlloc(ctx context.Context, allocate storiface.SectorFileType, ssize abi.SectorSize, pathType storiface.PathType) ([]StorageInfo, error)
 
 	// atomically acquire locks on all sector file types. close ctx to unlock
 	StorageLock(ctx context.Context, sector abi.SectorID, read storiface.SectorFileType, write storiface.SectorFileType) error
 	StorageTryLock(ctx context.Context, sector abi.SectorID, read storiface.SectorFileType, write storiface.SectorFileType) (bool, error)
-
-	StorageList(ctx context.Context) (map[ID][]Decl, error)
 }
 
 type Decl struct {
@@ -194,25 +189,6 @@ func (i *Index) StorageReportHealth(ctx context.Context, id ID, report HealthRep
 		ent.heartbeatErr = nil
 	}
 	ent.lastHeartbeat = time.Now()
-
-	if report.Stat.Capacity > 0 {
-		ctx, _ = tag.New(ctx, tag.Upsert(metrics.StorageID, string(id)))
-
-		stats.Record(ctx, metrics.StorageFSAvailable.M(float64(report.Stat.FSAvailable)/float64(report.Stat.Capacity)))
-		stats.Record(ctx, metrics.StorageAvailable.M(float64(report.Stat.Available)/float64(report.Stat.Capacity)))
-		stats.Record(ctx, metrics.StorageReserved.M(float64(report.Stat.Reserved)/float64(report.Stat.Capacity)))
-
-		stats.Record(ctx, metrics.StorageCapacityBytes.M(report.Stat.Capacity))
-		stats.Record(ctx, metrics.StorageFSAvailableBytes.M(report.Stat.FSAvailable))
-		stats.Record(ctx, metrics.StorageAvailableBytes.M(report.Stat.Available))
-		stats.Record(ctx, metrics.StorageReservedBytes.M(report.Stat.Reserved))
-
-		if report.Stat.Max > 0 {
-			stats.Record(ctx, metrics.StorageLimitUsed.M(float64(report.Stat.Used)/float64(report.Stat.Max)))
-			stats.Record(ctx, metrics.StorageLimitUsedBytes.M(report.Stat.Used))
-			stats.Record(ctx, metrics.StorageLimitMaxBytes.M(report.Stat.Max))
-		}
-	}
 
 	return nil
 }
@@ -408,16 +384,7 @@ func (i *Index) StorageBestAlloc(ctx context.Context, allocate storiface.SectorF
 
 	var candidates []storageEntry
 
-	var err error
-	var spaceReq uint64
-	switch pathType {
-	case storiface.PathSealing:
-		spaceReq, err = allocate.SealSpaceUse(ssize)
-	case storiface.PathStorage:
-		spaceReq, err = allocate.StoreSpaceUse(ssize)
-	default:
-		panic(fmt.Sprintf("unexpected pathType: %s", pathType))
-	}
+	spaceReq, err := allocate.SealSpaceUse(ssize)
 	if err != nil {
 		return nil, xerrors.Errorf("estimating required space: %w", err)
 	}
@@ -487,3 +454,42 @@ func (i *Index) FindSector(id abi.SectorID, typ storiface.SectorFileType) ([]ID,
 }
 
 var _ SectorIndex = &Index{}
+
+func (i *Index) MaybeAddPice(ctx context.Context, allocate storiface.SectorFileType, ssize abi.SectorSize, pathType storiface.PathType) bool {
+	i.lk.RLock()
+	defer i.lk.RUnlock()
+
+	isAddPice := false
+
+	spaceReq, err := allocate.SealSpaceUse(ssize)
+	if err != nil {
+		log.Debugf("allocating space compute failer")
+		return false
+	}
+
+	for _, p := range i.stores {
+		if (pathType == storiface.PathSealing) && !p.info.CanSeal {
+			continue
+		}
+
+		if (spaceReq * 10) > uint64(p.fsi.Available) {
+			log.Debugf("not allocating on %s, out of space (available: %d, need: %d)", p.info.ID, p.fsi.Available, spaceReq)
+			continue
+		}
+
+		if time.Since(p.lastHeartbeat) > SkippedHeartbeatThresh {
+			log.Debugf("not allocating on %s, didn't receive heartbeats for %s", p.info.ID, time.Since(p.lastHeartbeat))
+			continue
+		}
+
+		if p.heartbeatErr != nil {
+			log.Debugf("not allocating on %s, heartbeat error: %s", p.info.ID, p.heartbeatErr)
+			continue
+		}
+
+		isAddPice = true
+		break
+	}
+
+	return isAddPice
+}

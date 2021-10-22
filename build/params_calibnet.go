@@ -1,4 +1,3 @@
-//go:build calibnet
 // +build calibnet
 
 package build
@@ -6,7 +5,6 @@ package build
 import (
 	"github.com/filecoin-project/go-address"
 	"github.com/filecoin-project/go-state-types/abi"
-	"github.com/filecoin-project/go-state-types/network"
 	"github.com/filecoin-project/lotus/chain/actors/policy"
 	builtin2 "github.com/filecoin-project/specs-actors/v2/actors/builtin"
 	"github.com/ipfs/go-cid"
@@ -15,8 +13,6 @@ import (
 var DrandSchedule = map[abi.ChainEpoch]DrandEnum{
 	0: DrandMainnet,
 }
-
-const GenesisNetworkVersion = network.Version0
 
 const BootstrappersFile = "calibnet.pi"
 const GenesisFile = "calibnet.car"
@@ -52,8 +48,6 @@ const UpgradeTurboHeight = 390
 
 const UpgradeHyperdriveHeight = 420
 
-const UpgradeChocolateHeight = 312746
-
 func init() {
 	policy.SetConsensusMinerMinPower(abi.NewStoragePower(32 << 30))
 	policy.SetSupportedProofTypes(
@@ -66,7 +60,6 @@ func init() {
 	Devnet = true
 
 	BuildType = BuildCalibnet
-
 }
 
 const BlockDelaySecs = uint64(builtin2.EpochDurationSeconds)

@@ -54,8 +54,7 @@ func (mb *mockBeacon) VerifyEntry(from types.BeaconEntry, to types.BeaconEntry) 
 }
 
 func (mb *mockBeacon) MaxBeaconRoundForEpoch(epoch abi.ChainEpoch) uint64 {
-	// offset for better testing
-	return uint64(epoch + 100)
+	return uint64(epoch)
 }
 
 var _ RandomBeacon = (*mockBeacon)(nil)

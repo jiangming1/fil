@@ -4,6 +4,8 @@ import (
 	"context"
 	"fmt"
 
+	"github.com/filecoin-project/lotus/api/v0api"
+
 	verifreg4 "github.com/filecoin-project/specs-actors/v4/actors/builtin/verifreg"
 
 	"github.com/filecoin-project/go-state-types/big"
@@ -14,7 +16,6 @@ import (
 	"github.com/filecoin-project/go-address"
 	"github.com/filecoin-project/go-state-types/abi"
 
-	"github.com/filecoin-project/lotus/api/v0api"
 	"github.com/filecoin-project/lotus/blockstore"
 	"github.com/filecoin-project/lotus/build"
 	"github.com/filecoin-project/lotus/chain/actors"
@@ -210,7 +211,7 @@ var filplusCheckClientCmd = &cli.Command{
 			return err
 		}
 		if dcap == nil {
-			return xerrors.Errorf("client %s is not a verified client", caddr)
+			return xerrors.Errorf("client %s is not a verified client", err)
 		}
 
 		fmt.Println(*dcap)

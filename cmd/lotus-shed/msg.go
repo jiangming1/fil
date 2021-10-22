@@ -8,6 +8,7 @@ import (
 	"fmt"
 
 	"github.com/fatih/color"
+
 	"github.com/ipfs/go-cid"
 	"github.com/urfave/cli/v2"
 	"golang.org/x/xerrors"
@@ -15,7 +16,7 @@ import (
 	"github.com/filecoin-project/go-address"
 	"github.com/filecoin-project/go-state-types/big"
 
-	"github.com/filecoin-project/lotus/chain/consensus/filcns"
+	"github.com/filecoin-project/lotus/chain/stmgr"
 	"github.com/filecoin-project/lotus/chain/types"
 	lcli "github.com/filecoin-project/lotus/cli"
 	"github.com/filecoin-project/specs-actors/v2/actors/builtin/multisig"
@@ -140,7 +141,7 @@ func printMessage(cctx *cli.Context, msg *types.Message) error {
 		return nil
 	}
 
-	fmt.Println("Method:", filcns.NewActorRegistry().Methods[toact.Code][msg.Method].Name) // todo use remote
+	fmt.Println("Method:", stmgr.MethodsMap[toact.Code][msg.Method].Name)
 	p, err := lcli.JsonParams(toact.Code, msg.Method, msg.Params)
 	if err != nil {
 		return err

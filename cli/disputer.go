@@ -238,9 +238,6 @@ var disputerStartCmd = &cli.Command{
 
 			dpmsgs := make([]*types.Message, 0)
 
-			startTime := time.Now()
-			proofsChecked := uint64(0)
-
 			// TODO: Parallelizeable
 			for _, dl := range dls {
 				fullDeadlines, err := api.StateMinerDeadlines(ctx, dl.miner, tsk)
@@ -252,10 +249,7 @@ var disputerStartCmd = &cli.Command{
 					return xerrors.Errorf("deadline index %d not found in deadlines", dl.index)
 				}
 
-				disputableProofs := fullDeadlines[dl.index].DisputableProofCount
-				proofsChecked += disputableProofs
-
-				ms, err := makeDisputeWindowedPosts(ctx, api, dl, disputableProofs, fromAddr)
+				ms, err := makeDisputeWindowedPosts(ctx, api, dl, fullDeadlines[dl.index].DisputableProofCount, fromAddr)
 				if err != nil {
 					return xerrors.Errorf("failed to check for disputes: %w", err)
 				}
@@ -269,8 +263,6 @@ var disputerStartCmd = &cli.Command{
 
 				deadlineMap[dClose+Confidence] = append(deadlineMap[dClose+Confidence], *dl)
 			}
-
-			disputeLog.Infow("checked proofs", "count", proofsChecked, "duration", time.Since(startTime))
 
 			// TODO: Parallelizeable / can be integrated into the previous deadline-iterating for loop
 			for _, dpmsg := range dpmsgs {

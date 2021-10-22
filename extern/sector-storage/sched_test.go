@@ -38,20 +38,6 @@ func TestWithPriority(t *testing.T) {
 	require.Equal(t, 2222, getPriority(ctx))
 }
 
-var decentWorkerResources = storiface.WorkerResources{
-	MemPhysical: 128 << 30,
-	MemSwap:     200 << 30,
-	MemReserved: 2 << 30,
-	CPUs:        32,
-	GPUs:        []string{"a GPU"},
-}
-
-var constrainedWorkerResources = storiface.WorkerResources{
-	MemPhysical: 1 << 30,
-	MemReserved: 2 << 30,
-	CPUs:        1,
-}
-
 type schedTestWorker struct {
 	name      string
 	taskTypes map[sealtasks.TaskType]struct{}
@@ -59,9 +45,6 @@ type schedTestWorker struct {
 
 	closed  bool
 	session uuid.UUID
-
-	resources       storiface.WorkerResources
-	ignoreResources bool
 }
 
 func (s *schedTestWorker) SealPreCommit1(ctx context.Context, sector storage.SectorRef, ticket abi.SealRandomness, pieces []abi.PieceInfo) (storiface.CallID, error) {
@@ -124,11 +107,18 @@ func (s *schedTestWorker) Paths(ctx context.Context) ([]stores.StoragePath, erro
 	return s.paths, nil
 }
 
+var decentWorkerResources = storiface.WorkerResources{
+	MemPhysical: 128 << 30,
+	MemSwap:     200 << 30,
+	MemReserved: 2 << 30,
+	CPUs:        32,
+	GPUs:        []string{"a GPU"},
+}
+
 func (s *schedTestWorker) Info(ctx context.Context) (storiface.WorkerInfo, error) {
 	return storiface.WorkerInfo{
-		Hostname:        s.name,
-		IgnoreResources: s.ignoreResources,
-		Resources:       s.resources,
+		Hostname:  s.name,
+		Resources: decentWorkerResources,
 	}, nil
 }
 
@@ -147,16 +137,13 @@ func (s *schedTestWorker) Close() error {
 
 var _ Worker = &schedTestWorker{}
 
-func addTestWorker(t *testing.T, sched *scheduler, index *stores.Index, name string, taskTypes map[sealtasks.TaskType]struct{}, resources storiface.WorkerResources, ignoreResources bool) {
+func addTestWorker(t *testing.T, sched *scheduler, index *stores.Index, name string, taskTypes map[sealtasks.TaskType]struct{}) {
 	w := &schedTestWorker{
 		name:      name,
 		taskTypes: taskTypes,
 		paths:     []stores.StoragePath{{ID: "bb-8", Weight: 2, LocalPath: "<octopus>food</octopus>", CanSeal: true, CanStore: true}},
 
 		session: uuid.New(),
-
-		resources:       resources,
-		ignoreResources: ignoreResources,
 	}
 
 	for _, path := range w.paths {
@@ -182,7 +169,7 @@ func TestSchedStartStop(t *testing.T) {
 	sched := newScheduler()
 	go sched.runSched()
 
-	addTestWorker(t, sched, stores.NewIndex(), "fred", nil, decentWorkerResources, false)
+	addTestWorker(t, sched, stores.NewIndex(), "fred", nil)
 
 	require.NoError(t, sched.Close(context.TODO()))
 }
@@ -196,9 +183,6 @@ func TestSched(t *testing.T) {
 	type workerSpec struct {
 		name      string
 		taskTypes map[sealtasks.TaskType]struct{}
-
-		resources       storiface.WorkerResources
-		ignoreResources bool
 	}
 
 	noopAction := func(ctx context.Context, w Worker) error {
@@ -311,7 +295,7 @@ func TestSched(t *testing.T) {
 			go sched.runSched()
 
 			for _, worker := range workers {
-				addTestWorker(t, sched, index, worker.name, worker.taskTypes, worker.resources, worker.ignoreResources)
+				addTestWorker(t, sched, index, worker.name, worker.taskTypes)
 			}
 
 			rm := runMeta{
@@ -338,42 +322,31 @@ func TestSched(t *testing.T) {
 		}
 	}
 
-	// checks behaviour with workers with constrained resources
-	// the first one is not ignoring resource constraints, so we assign to the second worker, who is
-	t.Run("constrained-resources", testFunc([]workerSpec{
-		{name: "fred1", resources: constrainedWorkerResources, taskTypes: map[sealtasks.TaskType]struct{}{sealtasks.TTPreCommit1: {}}},
-		{name: "fred2", resources: constrainedWorkerResources, ignoreResources: true, taskTypes: map[sealtasks.TaskType]struct{}{sealtasks.TTPreCommit1: {}}},
-	}, []task{
-		sched("pc1-1", "fred2", 8, sealtasks.TTPreCommit1),
-		taskStarted("pc1-1"),
-		taskDone("pc1-1"),
-	}))
-
 	t.Run("one-pc1", testFunc([]workerSpec{
-		{name: "fred", resources: decentWorkerResources, taskTypes: map[sealtasks.TaskType]struct{}{sealtasks.TTPreCommit1: {}}},
+		{name: "fred", taskTypes: map[sealtasks.TaskType]struct{}{sealtasks.TTPreCommit1: {}}},
 	}, []task{
 		sched("pc1-1", "fred", 8, sealtasks.TTPreCommit1),
 		taskDone("pc1-1"),
 	}))
 
 	t.Run("pc1-2workers-1", testFunc([]workerSpec{
-		{name: "fred2", resources: decentWorkerResources, taskTypes: map[sealtasks.TaskType]struct{}{sealtasks.TTPreCommit2: {}}},
-		{name: "fred1", resources: decentWorkerResources, taskTypes: map[sealtasks.TaskType]struct{}{sealtasks.TTPreCommit1: {}}},
+		{name: "fred2", taskTypes: map[sealtasks.TaskType]struct{}{sealtasks.TTPreCommit2: {}}},
+		{name: "fred1", taskTypes: map[sealtasks.TaskType]struct{}{sealtasks.TTPreCommit1: {}}},
 	}, []task{
 		sched("pc1-1", "fred1", 8, sealtasks.TTPreCommit1),
 		taskDone("pc1-1"),
 	}))
 
 	t.Run("pc1-2workers-2", testFunc([]workerSpec{
-		{name: "fred1", resources: decentWorkerResources, taskTypes: map[sealtasks.TaskType]struct{}{sealtasks.TTPreCommit1: {}}},
-		{name: "fred2", resources: decentWorkerResources, taskTypes: map[sealtasks.TaskType]struct{}{sealtasks.TTPreCommit2: {}}},
+		{name: "fred1", taskTypes: map[sealtasks.TaskType]struct{}{sealtasks.TTPreCommit1: {}}},
+		{name: "fred2", taskTypes: map[sealtasks.TaskType]struct{}{sealtasks.TTPreCommit2: {}}},
 	}, []task{
 		sched("pc1-1", "fred1", 8, sealtasks.TTPreCommit1),
 		taskDone("pc1-1"),
 	}))
 
 	t.Run("pc1-block-pc2", testFunc([]workerSpec{
-		{name: "fred", resources: decentWorkerResources, taskTypes: map[sealtasks.TaskType]struct{}{sealtasks.TTPreCommit1: {}, sealtasks.TTPreCommit2: {}}},
+		{name: "fred", taskTypes: map[sealtasks.TaskType]struct{}{sealtasks.TTPreCommit1: {}, sealtasks.TTPreCommit2: {}}},
 	}, []task{
 		sched("pc1", "fred", 8, sealtasks.TTPreCommit1),
 		taskStarted("pc1"),
@@ -386,7 +359,7 @@ func TestSched(t *testing.T) {
 	}))
 
 	t.Run("pc2-block-pc1", testFunc([]workerSpec{
-		{name: "fred", resources: decentWorkerResources, taskTypes: map[sealtasks.TaskType]struct{}{sealtasks.TTPreCommit1: {}, sealtasks.TTPreCommit2: {}}},
+		{name: "fred", taskTypes: map[sealtasks.TaskType]struct{}{sealtasks.TTPreCommit1: {}, sealtasks.TTPreCommit2: {}}},
 	}, []task{
 		sched("pc2", "fred", 8, sealtasks.TTPreCommit2),
 		taskStarted("pc2"),
@@ -399,7 +372,7 @@ func TestSched(t *testing.T) {
 	}))
 
 	t.Run("pc1-batching", testFunc([]workerSpec{
-		{name: "fred", resources: decentWorkerResources, taskTypes: map[sealtasks.TaskType]struct{}{sealtasks.TTPreCommit1: {}}},
+		{name: "fred", taskTypes: map[sealtasks.TaskType]struct{}{sealtasks.TTPreCommit1: {}}},
 	}, []task{
 		sched("t1", "fred", 8, sealtasks.TTPreCommit1),
 		taskStarted("t1"),
@@ -486,7 +459,7 @@ func TestSched(t *testing.T) {
 	// run this one a bunch of times, it had a very annoying tendency to fail randomly
 	for i := 0; i < 40; i++ {
 		t.Run("pc1-pc2-prio", testFunc([]workerSpec{
-			{name: "fred", resources: decentWorkerResources, taskTypes: map[sealtasks.TaskType]struct{}{sealtasks.TTPreCommit1: {}, sealtasks.TTPreCommit2: {}}},
+			{name: "fred", taskTypes: map[sealtasks.TaskType]struct{}{sealtasks.TTPreCommit1: {}, sealtasks.TTPreCommit2: {}}},
 		}, []task{
 			// fill queues
 			twoPC1("w0", 0, taskStarted),

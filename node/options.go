@@ -110,9 +110,7 @@ func as(in interface{}, as interface{}) interface{} {
 		panic("outType is not a pointer")
 	}
 
-	inType := reflect.TypeOf(in)
-
-	if inType.Kind() != reflect.Func || inType.AssignableTo(outType.Elem()) {
+	if reflect.TypeOf(in).Kind() != reflect.Func {
 		ctype := reflect.FuncOf(nil, []reflect.Type{outType.Elem()}, false)
 
 		return reflect.MakeFunc(ctype, func(args []reflect.Value) (results []reflect.Value) {
@@ -122,6 +120,8 @@ func as(in interface{}, as interface{}) interface{} {
 			return []reflect.Value{out.Elem()}
 		}).Interface()
 	}
+
+	inType := reflect.TypeOf(in)
 
 	ins := make([]reflect.Type, inType.NumIn())
 	outs := make([]reflect.Type, inType.NumOut())

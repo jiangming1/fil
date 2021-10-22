@@ -88,11 +88,7 @@ func (ca *channelAccessor) messageBuilder(ctx context.Context, from address.Addr
 		return nil, err
 	}
 
-	av, err := actors.VersionForNetwork(nwVersion)
-	if err != nil {
-		return nil, err
-	}
-	return paych.Message(av, from), nil
+	return paych.Message(actors.VersionForNetwork(nwVersion), from), nil
 }
 
 func (ca *channelAccessor) getChannelInfo(addr address.Address) (*ChannelInfo, error) {
@@ -182,20 +178,6 @@ func (ca *channelAccessor) checkVoucherValid(ctx context.Context, ch address.Add
 func (ca *channelAccessor) checkVoucherValidUnlocked(ctx context.Context, ch address.Address, sv *paych.SignedVoucher) (map[uint64]paych.LaneState, error) {
 	if sv.ChannelAddr != ch {
 		return nil, xerrors.Errorf("voucher ChannelAddr doesn't match channel address, got %s, expected %s", sv.ChannelAddr, ch)
-	}
-
-	// check voucher is unlocked
-	if sv.Extra != nil {
-		return nil, xerrors.Errorf("voucher is Message Locked")
-	}
-	if sv.TimeLockMax != 0 {
-		return nil, xerrors.Errorf("voucher is Max Time Locked")
-	}
-	if sv.TimeLockMin != 0 {
-		return nil, xerrors.Errorf("voucher is Min Time Locked")
-	}
-	if len(sv.SecretPreimage) != 0 {
-		return nil, xerrors.Errorf("voucher is Hash Locked")
 	}
 
 	// Load payment channel actor state

@@ -6,8 +6,6 @@ import (
 	"io"
 	"testing"
 
-	"github.com/filecoin-project/go-address"
-	"github.com/filecoin-project/go-state-types/big"
 	"github.com/filecoin-project/go-state-types/network"
 
 	cbor "github.com/ipfs/go-ipld-cbor"
@@ -82,30 +80,6 @@ func (basicContract) InvokeSomething10(rt runtime2.Runtime, params *basicParams)
 	return nil
 }
 
-type basicRtMessage struct{}
-
-var _ runtime2.Message = (*basicRtMessage)(nil)
-
-func (*basicRtMessage) Caller() address.Address {
-	a, err := address.NewIDAddress(0)
-	if err != nil {
-		panic(err)
-	}
-	return a
-}
-
-func (*basicRtMessage) Receiver() address.Address {
-	a, err := address.NewIDAddress(1)
-	if err != nil {
-		panic(err)
-	}
-	return a
-}
-
-func (*basicRtMessage) ValueReceived() abi.TokenAmount {
-	return big.NewInt(0)
-}
-
 func TestInvokerBasic(t *testing.T) {
 	inv := ActorRegistry{}
 	code, err := inv.transform(basicContract{})
@@ -115,7 +89,7 @@ func TestInvokerBasic(t *testing.T) {
 		bParam, err := actors.SerializeParams(&basicParams{B: 1})
 		assert.NoError(t, err)
 
-		_, aerr := code[0](&Runtime{Message: &basicRtMessage{}}, bParam)
+		_, aerr := code[0](&Runtime{}, bParam)
 
 		assert.Equal(t, exitcode.ExitCode(1), aerrors.RetCode(aerr), "return code should be 1")
 		if aerrors.IsFatal(aerr) {
@@ -127,7 +101,7 @@ func TestInvokerBasic(t *testing.T) {
 		bParam, err := actors.SerializeParams(&basicParams{B: 2})
 		assert.NoError(t, err)
 
-		_, aerr := code[10](&Runtime{Message: &basicRtMessage{}}, bParam)
+		_, aerr := code[10](&Runtime{}, bParam)
 		assert.Equal(t, exitcode.ExitCode(12), aerrors.RetCode(aerr), "return code should be 12")
 		if aerrors.IsFatal(aerr) {
 			t.Fatal("err should not be fatal")
@@ -139,7 +113,6 @@ func TestInvokerBasic(t *testing.T) {
 			vm: &VM{ntwkVersion: func(ctx context.Context, epoch abi.ChainEpoch) network.Version {
 				return network.Version0
 			}},
-			Message: &basicRtMessage{},
 		}, []byte{99})
 		if aerrors.IsFatal(aerr) {
 			t.Fatal("err should not be fatal")
@@ -152,7 +125,6 @@ func TestInvokerBasic(t *testing.T) {
 			vm: &VM{ntwkVersion: func(ctx context.Context, epoch abi.ChainEpoch) network.Version {
 				return network.Version7
 			}},
-			Message: &basicRtMessage{},
 		}, []byte{99})
 		if aerrors.IsFatal(aerr) {
 			t.Fatal("err should not be fatal")

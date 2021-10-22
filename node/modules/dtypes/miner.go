@@ -74,12 +74,10 @@ type ConsiderUnverifiedStorageDealsConfigFunc func() (bool, error)
 // disable or enable unverified storage deal acceptance.
 type SetConsiderUnverifiedStorageDealsConfigFunc func(bool) error
 
-// SetSealingConfigFunc is a function which is used to
-// sets the sealing config.
+// SetSealingDelay sets how long a sector waits for more deals before sealing begins.
 type SetSealingConfigFunc func(sealiface.Config) error
 
-// GetSealingConfigFunc is a function which is used to
-// get the sealing config.
+// GetSealingDelay returns how long a sector waits for more deals before sealing begins.
 type GetSealingConfigFunc func() (sealiface.Config, error)
 
 // SetExpectedSealDurationFunc is a function which is used to set how long sealing is expected to take.
@@ -95,5 +93,3 @@ type GetMaxDealStartDelayFunc func() (time.Duration, error)
 
 type StorageDealFilter func(ctx context.Context, deal storagemarket.MinerDeal) (bool, string, error)
 type RetrievalDealFilter func(ctx context.Context, deal retrievalmarket.ProviderDealState) (bool, string, error)
-
-type RetrievalPricingFunc func(ctx context.Context, dealPricingParams retrievalmarket.PricingInput) (retrievalmarket.Ask, error)

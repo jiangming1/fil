@@ -114,12 +114,7 @@ func (p *path) stat(ls LocalStorage) (fsutil.FsStat, error) {
 				used, err = ls.DiskUsage(p)
 			}
 			if err != nil {
-				// we don't care about 'not exist' errors, as storage can be
-				// reserved before any files are written, so this error is not
-				// unexpected
-				if !os.IsNotExist(err) {
-					log.Warnf("getting disk usage of '%s': %+v", p.sectorPath(id, fileType), err)
-				}
+				log.Debugf("getting disk usage of '%s': %+v", p.sectorPath(id, fileType), err)
 				continue
 			}
 
@@ -162,8 +157,6 @@ func (p *path) stat(ls LocalStorage) (fsutil.FsStat, error) {
 func (p *path) sectorPath(sid abi.SectorID, fileType storiface.SectorFileType) string {
 	return filepath.Join(p.local, fileType.String(), storiface.SectorName(sid))
 }
-
-type URLs []string
 
 func NewLocal(ctx context.Context, ls LocalStorage, index SectorIndex, urls []string) (*Local, error) {
 	l := &Local{
@@ -395,7 +388,7 @@ func (st *Local) Reserve(ctx context.Context, sid storage.SectorRef, ft storifac
 		overhead := int64(overheadTab[fileType]) * int64(ssize) / storiface.FSOverheadDen
 
 		if stat.Available < overhead {
-			return nil, storiface.Err(storiface.ErrTempAllocateSpace, xerrors.Errorf("can't reserve %d bytes in '%s' (id:%s), only %d available", overhead, p.local, id, stat.Available))
+			// return nil, storiface.Err(storiface.ErrTempAllocateSpace, xerrors.Errorf("can't reserve %d bytes in '%s' (id:%s), only %d available", overhead, p.local, id, stat.Available))
 		}
 
 		p.reserved += overhead
@@ -442,7 +435,7 @@ func (st *Local) AcquireSector(ctx context.Context, sid storage.SectorRef, exist
 			continue
 		}
 
-		si, err := st.index.StorageFindSector(ctx, sid.ID, fileType, ssize, false)
+		si, err := st.CheckDeclareSector(ctx, sid.ID, fileType, ssize, pathType)
 		if err != nil {
 			log.Warnf("finding existing sector %d(t:%d) failed: %+v", sid, fileType, err)
 			continue
@@ -701,3 +694,27 @@ func (st *Local) FsStat(ctx context.Context, id ID) (fsutil.FsStat, error) {
 }
 
 var _ Store = &Local{}
+
+func (st *Local) CheckDeclareSector(ctx context.Context, sid abi.SectorID, fileType storiface.SectorFileType, ssize abi.SectorSize, pathType storiface.PathType) ([]SectorStorageInfo, error) {
+	si0, err := st.index.StorageFindSector(ctx, sid, fileType, ssize, false)
+	if len(si0) > 0 || err != nil {
+		return si0, err
+	}
+	if pathType == storiface.PathStorage {
+		for id, path := range st.paths {
+			if sstInfo, err := st.index.StorageInfo(ctx, id); err == nil {
+				if sstInfo.CanStore {
+					p := filepath.Join(path.local, fileType.String(), storiface.SectorName(sid))
+					_, err := os.Stat(p)
+					if os.IsNotExist(err) || err != nil {
+						continue
+					}
+					if err := st.index.StorageDeclareSector(ctx, id, sid, fileType, sstInfo.CanStore); err != nil {
+						continue
+					}
+				}
+			}
+		}
+	}
+	return st.index.StorageFindSector(ctx, sid, fileType, ssize, false)
+}

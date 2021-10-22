@@ -32,6 +32,7 @@ import (
 	"github.com/filecoin-project/lotus/lib/sigs"
 	"github.com/filecoin-project/lotus/markets/utils"
 	"github.com/filecoin-project/lotus/node/config"
+	"github.com/filecoin-project/lotus/node/modules/dtypes"
 	"github.com/filecoin-project/lotus/node/modules/helpers"
 	"github.com/filecoin-project/lotus/storage/sectorblocks"
 )
@@ -44,6 +45,9 @@ var log = logging.Logger("storageadapter")
 type ProviderNodeAdapter struct {
 	v1api.FullNode
 
+	// this goes away with the data transfer module
+	dag dtypes.StagingDAG
+
 	secb *sectorblocks.SectorBlocks
 	ev   *events.Events
 
@@ -55,17 +59,15 @@ type ProviderNodeAdapter struct {
 	scMgr                       *SectorCommittedManager
 }
 
-func NewProviderNodeAdapter(fc *config.MinerFeeConfig, dc *config.DealmakingConfig) func(mctx helpers.MetricsCtx, lc fx.Lifecycle, secb *sectorblocks.SectorBlocks, full v1api.FullNode, dealPublisher *DealPublisher) (storagemarket.StorageProviderNode, error) {
-	return func(mctx helpers.MetricsCtx, lc fx.Lifecycle, secb *sectorblocks.SectorBlocks, full v1api.FullNode, dealPublisher *DealPublisher) (storagemarket.StorageProviderNode, error) {
+func NewProviderNodeAdapter(fc *config.MinerFeeConfig, dc *config.DealmakingConfig) func(mctx helpers.MetricsCtx, lc fx.Lifecycle, dag dtypes.StagingDAG, secb *sectorblocks.SectorBlocks, full v1api.FullNode, dealPublisher *DealPublisher) storagemarket.StorageProviderNode {
+	return func(mctx helpers.MetricsCtx, lc fx.Lifecycle, dag dtypes.StagingDAG, secb *sectorblocks.SectorBlocks, full v1api.FullNode, dealPublisher *DealPublisher) storagemarket.StorageProviderNode {
 		ctx := helpers.LifecycleCtx(mctx, lc)
 
-		ev, err := events.NewEvents(ctx, full)
-		if err != nil {
-			return nil, err
-		}
+		ev := events.NewEvents(ctx, full)
 		na := &ProviderNodeAdapter{
 			FullNode: full,
 
+			dag:           dag,
 			secb:          secb,
 			ev:            ev,
 			dealPublisher: dealPublisher,
@@ -80,7 +82,7 @@ func NewProviderNodeAdapter(fc *config.MinerFeeConfig, dc *config.DealmakingConf
 		}
 		na.scMgr = NewSectorCommittedManager(ev, na, &apiWrapper{api: full})
 
-		return na, nil
+		return na
 	}
 }
 
@@ -93,11 +95,11 @@ func (n *ProviderNodeAdapter) OnDealComplete(ctx context.Context, deal storagema
 		return nil, xerrors.Errorf("deal.PublishCid can't be nil")
 	}
 
-	sdInfo := api.PieceDealInfo{
+	sdInfo := sealing.DealInfo{
 		DealID:       deal.DealID,
 		DealProposal: &deal.Proposal,
 		PublishCid:   deal.PublishCid,
-		DealSchedule: api.DealSchedule{
+		DealSchedule: sealing.DealSchedule{
 			StartEpoch: deal.ClientDealProposal.Proposal.StartEpoch,
 			EndEpoch:   deal.ClientDealProposal.Proposal.EndEpoch,
 		},
@@ -105,8 +107,8 @@ func (n *ProviderNodeAdapter) OnDealComplete(ctx context.Context, deal storagema
 	}
 
 	p, offset, err := n.secb.AddPiece(ctx, pieceSize, pieceData, sdInfo)
-	curTime := build.Clock.Now()
-	for build.Clock.Since(curTime) < addPieceRetryTimeout {
+	curTime := time.Now()
+	for time.Since(curTime) < addPieceRetryTimeout {
 		if !xerrors.Is(err, sealing.ErrTooManySectorsSealing) {
 			if err != nil {
 				log.Errorf("failed to addPiece for deal %d, err: %v", deal.DealID, err)
@@ -114,7 +116,7 @@ func (n *ProviderNodeAdapter) OnDealComplete(ctx context.Context, deal storagema
 			break
 		}
 		select {
-		case <-build.Clock.After(addPieceRetryWait):
+		case <-time.After(addPieceRetryWait):
 			p, offset, err = n.secb.AddPiece(ctx, pieceSize, pieceData, sdInfo)
 		case <-ctx.Done():
 			return nil, xerrors.New("context expired while waiting to retry AddPiece")
@@ -238,19 +240,19 @@ func (n *ProviderNodeAdapter) LocatePieceForDealWithinSector(ctx context.Context
 
 	// TODO: better strategy (e.g. look for already unsealed)
 	var best api.SealedRef
-	var bestSi api.SectorInfo
+	var bestSi sealing.SectorInfo
 	for _, r := range refs {
-		si, err := n.secb.SectorBuilder.SectorsStatus(ctx, r.SectorID, false)
+		si, err := n.secb.Miner.GetSectorInfo(r.SectorID)
 		if err != nil {
 			return 0, 0, 0, xerrors.Errorf("getting sector info: %w", err)
 		}
-		if si.State == api.SectorState(sealing.Proving) {
+		if si.State == sealing.Proving {
 			best = r
 			bestSi = si
 			break
 		}
 	}
-	if bestSi.State == api.SectorState(sealing.UndefinedSectorState) {
+	if bestSi.State == sealing.UndefinedSectorState {
 		return 0, 0, 0, xerrors.New("no sealed sector found")
 	}
 	return best.SectorID, best.Offset, best.Size.Padded(), nil
@@ -343,7 +345,7 @@ func (n *ProviderNodeAdapter) OnDealExpiredOrSlashed(ctx context.Context, dealID
 	}
 
 	// Called immediately to check if the deal has already expired or been slashed
-	checkFunc := func(ctx context.Context, ts *types.TipSet) (done bool, more bool, err error) {
+	checkFunc := func(ts *types.TipSet) (done bool, more bool, err error) {
 		if ts == nil {
 			// keep listening for events
 			return false, true, nil

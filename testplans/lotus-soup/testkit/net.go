@@ -74,11 +74,6 @@ func ApplyNetworkParameters(t *TestEnvironment) {
 		t.D().RecordPoint("duplicate_packet_correlation", float64(ls.DuplicateCorr))
 	}
 
-	if t.IsParamSet("bandwidth") {
-		ls.Bandwidth = t.SizeParam("bandwidth")
-		t.D().RecordPoint("bandwidth_bytes", float64(ls.Bandwidth))
-	}
-
 	t.NetClient.MustConfigureNetwork(ctx, &network.Config{
 		Network:        "default",
 		Enable:         true,

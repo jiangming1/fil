@@ -20,7 +20,6 @@ func main() {
 		base32Cmd,
 		base16Cmd,
 		bitFieldCmd,
-		cronWcCmd,
 		frozenMinersCmd,
 		keyinfoCmd,
 		jwtCmd,
@@ -35,7 +34,6 @@ func main() {
 		postFindCmd,
 		proofsCmd,
 		verifRegCmd,
-		marketCmd,
 		miscCmd,
 		mpoolCmd,
 		genesisVerifyCmd,
@@ -43,7 +41,6 @@ func main() {
 		minerCmd,
 		mpoolStatsCmd,
 		exportChainCmd,
-		exportCarCmd,
 		consensusCmd,
 		storageStatsCmd,
 		syncCmd,
@@ -57,11 +54,6 @@ func main() {
 		cidCmd,
 		blockmsgidCmd,
 		signaturesCmd,
-		actorCmd,
-		minerTypesCmd,
-		minerMultisigsCmd,
-		splitstoreCmd,
-		fr32Cmd,
 	}
 
 	app := &cli.App{

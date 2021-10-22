@@ -1,19 +1,11 @@
 package build
 
-import (
-	_ "embed"
-)
-
-//go:embed proof-params/parameters.json
-var params []byte
-
-//go:embed proof-params/srs-inner-product.json
-var srs []byte
+import rice "github.com/GeertJohan/go.rice"
 
 func ParametersJSON() []byte {
-	return params
+	return rice.MustFindBox("proof-params").MustBytes("parameters.json")
 }
 
 func SrsJSON() []byte {
-	return srs
+	return rice.MustFindBox("proof-params").MustBytes("srs-inner-product.json")
 }

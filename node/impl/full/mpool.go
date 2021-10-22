@@ -84,10 +84,9 @@ func (a *MpoolAPI) MpoolPending(ctx context.Context, tsk types.TipSetKey) ([]*ty
 			if mpts.Equals(ts) {
 				return pending, nil
 			}
+			// different blocks in tipsets
 
-			// different blocks in tipsets of the same height
-			// we exclude messages that have been included in blocks in the mpool tipset
-			have, err := a.Mpool.MessagesForBlocks(mpts.Blocks())
+			have, err := a.Mpool.MessagesForBlocks(ts.Blocks())
 			if err != nil {
 				return nil, xerrors.Errorf("getting messages for base ts: %w", err)
 			}
@@ -224,18 +223,6 @@ func (a *MpoolAPI) MpoolBatchPushMessage(ctx context.Context, msgs []*types.Mess
 		smsgs = append(smsgs, smsg)
 	}
 	return smsgs, nil
-}
-
-func (a *MpoolAPI) MpoolCheckMessages(ctx context.Context, protos []*api.MessagePrototype) ([][]api.MessageCheckStatus, error) {
-	return a.Mpool.CheckMessages(ctx, protos)
-}
-
-func (a *MpoolAPI) MpoolCheckPendingMessages(ctx context.Context, from address.Address) ([][]api.MessageCheckStatus, error) {
-	return a.Mpool.CheckPendingMessages(ctx, from)
-}
-
-func (a *MpoolAPI) MpoolCheckReplaceMessages(ctx context.Context, msgs []*types.Message) ([][]api.MessageCheckStatus, error) {
-	return a.Mpool.CheckReplaceMessages(ctx, msgs)
 }
 
 func (a *MpoolAPI) MpoolGetNonce(ctx context.Context, addr address.Address) (uint64, error) {

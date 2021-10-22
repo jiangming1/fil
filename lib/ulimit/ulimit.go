@@ -3,13 +3,10 @@ package ulimit
 // from go-ipfs
 
 import (
-	"errors"
 	"fmt"
 	"os"
 	"strconv"
 	"syscall"
-
-	"github.com/filecoin-project/lotus/build"
 
 	logging "github.com/ipfs/go-log/v2"
 )
@@ -28,15 +25,8 @@ var (
 // minimum file descriptor limit before we complain
 const minFds = 2048
 
-var ErrUnsupported = errors.New("unsupported")
-
-func GetLimit() (uint64, uint64, error) {
-	if getLimit == nil {
-		return 0, 0, ErrUnsupported
-	}
-
-	return getLimit()
-}
+// default max file descriptor limit.
+const maxFds = 16 << 10
 
 // userMaxFDs returns the value of LOTUS_FD_MAX
 func userMaxFDs() uint64 {
@@ -65,13 +55,13 @@ func ManageFdLimit() (changed bool, newLimit uint64, err error) {
 		return false, 0, nil
 	}
 
-	targetLimit := build.DefaultFDLimit
+	targetLimit := uint64(maxFds)
 	userLimit := userMaxFDs()
 	if userLimit > 0 {
 		targetLimit = userLimit
 	}
 
-	soft, hard, err := GetLimit()
+	soft, hard, err := getLimit()
 	if err != nil {
 		return false, 0, err
 	}

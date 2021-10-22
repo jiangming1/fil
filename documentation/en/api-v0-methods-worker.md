@@ -15,6 +15,8 @@
   * [MoveStorage](#MoveStorage)
 * [Process](#Process)
   * [ProcessSession](#ProcessSession)
+* [Read](#Read)
+  * [ReadPiece](#ReadPiece)
 * [Release](#Release)
   * [ReleaseUnsealed](#ReleaseUnsealed)
 * [Seal](#Seal)
@@ -89,7 +91,6 @@ Response:
 ```json
 {
   "Hostname": "string value",
-  "IgnoreResources": true,
   "Resources": {
     "MemPhysical": 42,
     "MemSwap": 42,
@@ -261,6 +262,41 @@ Perms: admin
 Inputs: `null`
 
 Response: `"07070707-0707-0707-0707-070707070707"`
+
+## Read
+
+
+### ReadPiece
+
+
+Perms: admin
+
+Inputs:
+```json
+[
+  {},
+  {
+    "ID": {
+      "Miner": 1000,
+      "Number": 9
+    },
+    "ProofType": 8
+  },
+  1040384,
+  1024
+]
+```
+
+Response:
+```json
+{
+  "Sector": {
+    "Miner": 1000,
+    "Number": 9
+  },
+  "ID": "07070707-0707-0707-0707-070707070707"
+}
+```
 
 ## Release
 

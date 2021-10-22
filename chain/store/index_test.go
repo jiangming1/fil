@@ -7,7 +7,6 @@ import (
 
 	"github.com/filecoin-project/go-state-types/abi"
 	"github.com/filecoin-project/lotus/blockstore"
-	"github.com/filecoin-project/lotus/chain/consensus/filcns"
 	"github.com/filecoin-project/lotus/chain/gen"
 	"github.com/filecoin-project/lotus/chain/store"
 	"github.com/filecoin-project/lotus/chain/types/mock"
@@ -32,7 +31,7 @@ func TestIndexSeeks(t *testing.T) {
 	ctx := context.TODO()
 
 	nbs := blockstore.NewMemorySync()
-	cs := store.NewChainStore(nbs, nbs, syncds.MutexWrap(datastore.NewMapDatastore()), filcns.Weight, nil)
+	cs := store.NewChainStore(nbs, nbs, syncds.MutexWrap(datastore.NewMapDatastore()), nil, nil)
 	defer cs.Close() //nolint:errcheck
 
 	_, err = cs.Import(bytes.NewReader(gencar))

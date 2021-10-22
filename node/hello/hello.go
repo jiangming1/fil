@@ -5,26 +5,23 @@ import (
 	"time"
 
 	"github.com/filecoin-project/go-state-types/abi"
-	"golang.org/x/xerrors"
+	xerrors "golang.org/x/xerrors"
 
-	cborutil "github.com/filecoin-project/go-cbor-util"
 	"github.com/filecoin-project/go-state-types/big"
 	"github.com/ipfs/go-cid"
 	logging "github.com/ipfs/go-log/v2"
 	"github.com/libp2p/go-libp2p-core/host"
 	inet "github.com/libp2p/go-libp2p-core/network"
 	"github.com/libp2p/go-libp2p-core/peer"
-	"github.com/libp2p/go-libp2p-core/protocol"
+	protocol "github.com/libp2p/go-libp2p-core/protocol"
 
+	cborutil "github.com/filecoin-project/go-cbor-util"
 	"github.com/filecoin-project/lotus/build"
 	"github.com/filecoin-project/lotus/chain"
-	"github.com/filecoin-project/lotus/chain/consensus"
 	"github.com/filecoin-project/lotus/chain/store"
 	"github.com/filecoin-project/lotus/chain/types"
 	"github.com/filecoin-project/lotus/lib/peermgr"
 )
-
-// TODO(TEST): missing test coverage.
 
 const ProtocolID = "/fil/hello/1.0.0"
 
@@ -36,24 +33,21 @@ type HelloMessage struct {
 	HeaviestTipSetWeight big.Int
 	GenesisHash          cid.Cid
 }
-
 type LatencyMessage struct {
 	TArrival int64
 	TSent    int64
 }
 
 type NewStreamFunc func(context.Context, peer.ID, ...protocol.ID) (inet.Stream, error)
-
 type Service struct {
 	h host.Host
 
 	cs     *store.ChainStore
 	syncer *chain.Syncer
-	cons   consensus.Consensus
 	pmgr   *peermgr.PeerMgr
 }
 
-func NewHelloService(h host.Host, cs *store.ChainStore, syncer *chain.Syncer, cons consensus.Consensus, pmgr peermgr.MaybePeerMgr) *Service {
+func NewHelloService(h host.Host, cs *store.ChainStore, syncer *chain.Syncer, pmgr peermgr.MaybePeerMgr) *Service {
 	if pmgr.Mgr == nil {
 		log.Warn("running without peer manager")
 	}
@@ -63,12 +57,12 @@ func NewHelloService(h host.Host, cs *store.ChainStore, syncer *chain.Syncer, co
 
 		cs:     cs,
 		syncer: syncer,
-		cons:   cons,
 		pmgr:   pmgr.Mgr,
 	}
 }
 
 func (hs *Service) HandleStream(s inet.Stream) {
+
 	var hmsg HelloMessage
 	if err := cborutil.ReadCborRPC(s, &hmsg); err != nil {
 		log.Infow("failed to read hello message, disconnecting", "error", err)
@@ -83,7 +77,7 @@ func (hs *Service) HandleStream(s inet.Stream) {
 		"hash", hmsg.GenesisHash)
 
 	if hmsg.GenesisHash != hs.syncer.Genesis.Cids()[0] {
-		log.Debugf("other peer has different genesis! (%s)", hmsg.GenesisHash)
+		log.Warnf("other peer has different genesis! (%s)", hmsg.GenesisHash)
 		_ = s.Conn().Close()
 		return
 	}
@@ -127,6 +121,7 @@ func (hs *Service) HandleStream(s inet.Stream) {
 		log.Debugf("Got new tipset through Hello: %s from %s", ts.Cids(), s.Conn().RemotePeer())
 		hs.syncer.InformNewHead(s.Conn().RemotePeer(), ts)
 	}
+
 }
 
 func (hs *Service) SayHello(ctx context.Context, pid peer.ID) error {

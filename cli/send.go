@@ -2,6 +2,7 @@ package cli
 
 import (
 	"encoding/hex"
+	"errors"
 	"fmt"
 
 	"github.com/urfave/cli/v2"
@@ -58,14 +59,10 @@ var sendCmd = &cli.Command{
 		},
 		&cli.BoolFlag{
 			Name:  "force",
-			Usage: "Deprecated: use global 'force-send'",
+			Usage: "must be specified for the action to take effect if maybe SysErrInsufficientFunds etc",
 		},
 	},
 	Action: func(cctx *cli.Context) error {
-		if cctx.IsSet("force") {
-			fmt.Println("'force' flag is deprecated, use global flag 'force-send'")
-		}
-
 		if cctx.Args().Len() != 2 {
 			return ShowHelp(cctx, fmt.Errorf("'send' expects two arguments, target and amount"))
 		}
@@ -140,22 +137,23 @@ var sendCmd = &cli.Command{
 			params.Params = decparams
 		}
 
+		params.Force = cctx.Bool("force")
+
 		if cctx.IsSet("nonce") {
 			n := cctx.Uint64("nonce")
 			params.Nonce = &n
 		}
 
-		proto, err := srv.MessageForSend(ctx, params)
+		msgCid, err := srv.Send(ctx, params)
+
 		if err != nil {
-			return xerrors.Errorf("creating message prototype: %w", err)
+			if errors.Is(err, ErrSendBalanceTooLow) {
+				return fmt.Errorf("--force must be specified for this action to have an effect; you have been warned: %w", err)
+			}
+			return xerrors.Errorf("executing send: %w", err)
 		}
 
-		sm, err := InteractiveSend(ctx, cctx, srv, proto)
-		if err != nil {
-			return err
-		}
-
-		fmt.Fprintf(cctx.App.Writer, "%s\n", sm.Cid())
+		fmt.Fprintf(cctx.App.Writer, "%s\n", msgCid)
 		return nil
 	},
 }

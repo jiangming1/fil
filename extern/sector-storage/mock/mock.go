@@ -6,7 +6,6 @@ import (
 	"crypto/sha256"
 	"fmt"
 	"io"
-	"io/ioutil"
 	"math/rand"
 	"sync"
 
@@ -35,9 +34,7 @@ type SectorMgr struct {
 	lk sync.Mutex
 }
 
-type mockVerifProver struct {
-	aggregates map[string]proof5.AggregateSealVerifyProofAndInfos // used for logging bad verifies
-}
+type mockVerifProver struct{}
 
 func NewMockSectorMgr(genesisSectors []abi.SectorID) *SectorMgr {
 	sectors := make(map[abi.SectorID]*sectorState)
@@ -73,10 +70,6 @@ type sectorState struct {
 
 func (mgr *SectorMgr) NewSector(ctx context.Context, sector storage.SectorRef) error {
 	return nil
-}
-
-func (mgr *SectorMgr) SectorsUnsealPiece(ctx context.Context, sector storage.SectorRef, offset storiface.UnpaddedByteIndex, size abi.UnpaddedPieceSize, randomness abi.SealRandomness, commd *cid.Cid) error {
-	panic("SectorMgr: unsealing piece: implement me")
 }
 
 func (mgr *SectorMgr) AddPiece(ctx context.Context, sectorID storage.SectorRef, existingPieces []abi.UnpaddedPieceSize, size abi.UnpaddedPieceSize, r io.Reader) (abi.PieceInfo, error) {
@@ -121,10 +114,6 @@ func (mgr *SectorMgr) AcquireSectorNumber() (abi.SectorNumber, error) {
 	id := mgr.nextSectorID
 	mgr.nextSectorID++
 	return id, nil
-}
-
-func (mgr *SectorMgr) IsUnsealed(ctx context.Context, sector storage.SectorRef, offset storiface.UnpaddedByteIndex, size abi.UnpaddedPieceSize) (bool, error) {
-	return false, nil
 }
 
 func (mgr *SectorMgr) ForceState(sid storage.SectorRef, st int) error {
@@ -384,12 +373,13 @@ func generateFakePoSt(sectorInfo []proof5.SectorInfo, rpt func(abi.RegisteredSea
 	}
 }
 
-func (mgr *SectorMgr) ReadPiece(ctx context.Context, sector storage.SectorRef, offset storiface.UnpaddedByteIndex, size abi.UnpaddedPieceSize, ticket abi.SealRandomness, unsealed cid.Cid) (io.ReadCloser, bool, error) {
+func (mgr *SectorMgr) ReadPiece(ctx context.Context, w io.Writer, sectorID storage.SectorRef, offset storiface.UnpaddedByteIndex, size abi.UnpaddedPieceSize, randomness abi.SealRandomness, c cid.Cid) error {
 	if offset != 0 {
 		panic("implme")
 	}
 
-	return ioutil.NopCloser(bytes.NewReader(mgr.pieces[mgr.sectors[sector.ID].pieces[0]][:size])), false, nil
+	_, err := io.CopyN(w, bytes.NewReader(mgr.pieces[mgr.sectors[sectorID.ID].pieces[0]]), int64(size))
+	return err
 }
 
 func (mgr *SectorMgr) StageFakeData(mid abi.ActorID, spt abi.RegisteredSealProof) (storage.SectorRef, []abi.PieceInfo, error) {
@@ -532,19 +522,7 @@ func (m mockVerifProver) VerifyAggregateSeals(aggregate proof5.AggregateSealVeri
 		}
 	}
 
-	ok := bytes.Equal(aggregate.Proof, out)
-	if !ok {
-		genInfo, found := m.aggregates[string(aggregate.Proof)]
-		if !found {
-			log.Errorf("BAD AGGREGATE: saved generate inputs not found; agg.Proof: %x; expected: %x", aggregate.Proof, out)
-		} else {
-			log.Errorf("BAD AGGREGATE (1): agg.Proof: %x; expected: %x", aggregate.Proof, out)
-			log.Errorf("BAD AGGREGATE (2): Verify   Infos: %+v", aggregate.Infos)
-			log.Errorf("BAD AGGREGATE (3): Generate Infos: %+v", genInfo.Infos)
-		}
-	}
-
-	return ok, nil
+	return bytes.Equal(aggregate.Proof, out), nil
 }
 
 func (m mockVerifProver) AggregateSealProofs(aggregateInfo proof5.AggregateSealVerifyProofAndInfos, proofs [][]byte) ([]byte, error) {
@@ -554,8 +532,6 @@ func (m mockVerifProver) AggregateSealProofs(aggregateInfo proof5.AggregateSealV
 			out[i] += proof[i] * uint8(pi)
 		}
 	}
-
-	m.aggregates[string(out)] = aggregateInfo
 
 	return out, nil
 }
@@ -616,11 +592,8 @@ func (m mockVerifProver) GenerateWinningPoStSectorChallenge(ctx context.Context,
 	return []uint64{0}, nil
 }
 
-var MockVerifier = mockVerifProver{
-	aggregates: map[string]proof5.AggregateSealVerifyProofAndInfos{},
-}
-
-var MockProver = MockVerifier
+var MockVerifier = mockVerifProver{}
+var MockProver = mockVerifProver{}
 
 var _ storage.Sealer = &SectorMgr{}
 var _ ffiwrapper.Verifier = MockVerifier

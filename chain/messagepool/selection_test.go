@@ -21,7 +21,6 @@ import (
 	builtin2 "github.com/filecoin-project/specs-actors/v2/actors/builtin"
 
 	"github.com/filecoin-project/lotus/build"
-	"github.com/filecoin-project/lotus/chain/consensus/filcns"
 	"github.com/filecoin-project/lotus/chain/messagepool/gasguess"
 	"github.com/filecoin-project/lotus/chain/types"
 	"github.com/filecoin-project/lotus/chain/types/mock"
@@ -61,7 +60,7 @@ func makeTestMessage(w *wallet.LocalWallet, from, to address.Address, nonce uint
 func makeTestMpool() (*MessagePool, *testMpoolAPI) {
 	tma := newTestMpoolAPI()
 	ds := datastore.NewMapDatastore()
-	mp, err := New(tma, ds, filcns.DefaultUpgradeSchedule(), "test", nil)
+	mp, err := New(tma, ds, "test", nil)
 	if err != nil {
 		panic(err)
 	}
